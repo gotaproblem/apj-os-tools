@@ -1,0 +1,178 @@
+[
+ {
+  "name": "FLOPPY",
+  "hash": "8d8aa60c"
+ },
+ {
+  "name": "HARD DISC",
+  "hash": "76e6ddb2"
+ },
+ {
+  "name": "CD-ROM",
+  "hash": "9db0a591"
+ },
+ {
+  "name": "RAMDISK",
+  "hash": "e549c1f0"
+ },
+ {
+  "name": "HARD DISK 2",
+  "hash": "76e6ddb2"
+ },
+ {
+  "name": "HARD DISK 3",
+  "hash": "5b703f93"
+ },
+ {
+  "name": "REMOVABLE",
+  "hash": "92c7c0be"
+ },
+ {
+  "name": "FOLDER",
+  "hash": "48bcec42"
+ },
+ {
+  "name": "GEMSYS",
+  "hash": "48bcec42"
+ },
+ {
+  "name": "MAGIC FOLDER",
+  "hash": "2dd05050"
+ },
+ {
+  "name": "MINT FOLDER",
+  "hash": "33ac452a"
+ },
+ {
+  "name": "UP",
+  "hash": "bf4fdfad"
+ },
+ {
+  "name": "DOWNLOAD",
+  "hash": "ef9cee95"
+ },
+ {
+  "name": "UPLOAD",
+  "hash": "e675ccf5"
+ },
+ {
+  "name": "FONTS",
+  "hash": "48bcec42"
+ },
+ {
+  "name": "FILE",
+  "hash": "74a1c37e"
+ },
+ {
+  "name": "TEXT FILE",
+  "hash": "cfe7577b"
+ },
+ {
+  "name": "HELP FILE",
+  "hash": "d69922cf"
+ },
+ {
+  "name": "FONT FILE",
+  "hash": "be4919ce"
+ },
+ {
+  "name": "PACK FILE",
+  "hash": "86b0e1c3"
+ },
+ {
+  "name": "IMAGE FILE",
+  "hash": "5708870e"
+ },
+ {
+  "name": "ACC",
+  "hash": "caa26d59"
+ },
+ {
+  "name": "APP",
+  "hash": "528d5f79"
+ },
+ {
+  "name": "GEM APP",
+  "hash": "528d5f79"
+ },
+ {
+  "name": "TOS APP",
+  "hash": "54e71279"
+ },
+ {
+  "name": "PRX",
+  "hash": "110a80f5"
+ },
+ {
+  "name": "TRASH",
+  "hash": "c9636a8c"
+ },
+ {
+  "name": "PRINTER",
+  "hash": "02a38e9a"
+ },
+ {
+  "name": "MINT",
+  "hash": "2d658068"
+ },
+ {
+  "name": "MAGIC",
+  "hash": "e04a21c9"
+ },
+ {
+  "name": "WWW",
+  "hash": "47c7d621"
+ },
+ {
+  "name": "PAINT",
+  "hash": "d052562f"
+ },
+ {
+  "name": "SEARCH",
+  "hash": "044c3ead"
+ },
+ {
+  "name": "VIEWER",
+  "hash": "a3f7f965"
+ },
+ {
+  "name": "MAIL",
+  "hash": "9cd6fc92"
+ },
+ {
+  "name": "HELP",
+  "hash": "fb8df7e5"
+ },
+ {
+  "name": "INFORMATION",
+  "hash": "d497a847"
+ },
+ {
+  "name": "DISABLE",
+  "hash": "231ecfff"
+ },
+ {
+  "name": "AUDIO FILE",
+  "hash": "a6bfced8"
+ },
+ {
+  "name": "VIDEO FILE",
+  "hash": "d8c0d65e"
+ },
+ {
+  "name": "MP3 PLAYER",
+  "hash": "afcd010b"
+ },
+ {
+  "name": "MP4 PLAYER",
+  "hash": "dcfeb29f"
+ },
+ {
+  "name": "SOURCE FILE",
+  "hash": "2a0eca95"
+ },
+ {
+  "name": "PDF FILE",
+  "hash": "3b30d4cb"
+ }
+]

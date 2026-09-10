@@ -14,7 +14,8 @@ resource. TeraDesk copies icon blocks per desktop item but never alters
 the mono part, so the hash survives; XaAES computes the same hash at draw
 time (render_apj.c apj_icon_hash).
 
-Usage: mkicons.py cicons.rsc svgdir outdir
+Usage: mkicons.py cicons.rsc svgdir outdir [size]   size 32 (default) keeps the original
+       art and appends; 48 or 64 re-renders every icon from Papirus at that size
 """
 import struct, sys, os, io, json
 import cairosvg
@@ -97,18 +98,28 @@ def to_planes(im, pal):
                 if best >> pl & 1: setbit(planes[pl], x, y)
     return bytes(mono), bytes(mask), b''.join(planes), bytes(mask)
 
-def make_icon_blob(name, im, pal, template_ib):
+def make_icon_blob(name, im, pal, template_ib, cell=None):
     w, h = im.size
     mono, mask, col, cmask = to_planes(im, pal)
     ib = list(template_ib); ib[8] = w; ib[9] = h
+    if cell:
+        # cell = (object w, object h, label h): icon centred, label below
+        ow, oh, lh = cell
+        ib[6] = (ow - w) // 2; ib[7] = 0
+        ib[10] = 0; ib[11] = h; ib[12] = ow; ib[13] = lh
+        ib[4] = ib[4] * w // 32; ib[5] = ib[5] * h // 32      # drive letter position
     blob = struct.pack('>3I11h', *ib) + struct.pack('>i', 1) + mono + mask
     blob += name.encode('latin-1')[:11].ljust(12, b'\0')
     blob += struct.pack('>h', 4) + struct.pack('>5i', 0, 0, 0, 0, 0) + col + cmask
     return blob, mono, mask
 
-def rebuild_rsc(d, P, new_blobs):
+def rebuild_rsc(d, P, new_blobs, all_blobs=None, objsize=None):
+    """all_blobs: replace every existing icon's blob (a full re-render);
+       objsize: (w, h) pixels for every icon object"""
     hdr = P['hdr'][:]; objs = [o[:] for o in P['objs']]
     n_old = len(objs); n_new = len(new_blobs)
+    if all_blobs:
+        P = dict(P); P['icons'] = [dict(ic, blob=b, start=0, replaced=True) for ic, b in zip(P['icons'], all_blobs)]
     # object table grows: new icon objects continue the picker grid
     last = objs[-1]; last[4] &= ~0x20            # clear OF_LASTOB on the old last
     last[0] = n_old                              # its next is the first new one
@@ -122,6 +133,11 @@ def rebuild_rsc(d, P, new_blobs):
         o = tmpl[:]; o[0] = n_old + i + 1; o[6] = n_old - 1 + i; o[7] = cols[x_i]; o[8] = y
         objs.append(o)
     objs[-1][0] = 0; objs[-1][4] |= 0x20         # last -> parent, OF_LASTOB
+    if objsize:
+        for o in objs[1:]:
+            o[9] = (objsize[0] << 8) & 0xFFFF; o[10] = (objsize[1] << 8) & 0xFFFF
+            o[7] = o[7] * objsize[0] // 72; o[8] = o[8] * objsize[1] // 40   # picker grid
+        objs[0][9] = objs[0][9] * objsize[0] // 72; objs[0][10] = objs[0][10] * objsize[1] // 40
     objs[0][2] = len(objs) - 1                   # root ob_tail
     if objs[0][10] < y + 4: objs[0][10] = y + 4  # root height in chars
     grow = n_new * 24
@@ -139,10 +155,15 @@ def rebuild_rsc(d, P, new_blobs):
     body = b''
     for ic in P['icons']:
         blob = bytearray(ic['blob'])
-        old_ptext = struct.unpack('>I', blob[8:12])[0]
-        if old_ptext:
-            # name sits at the same place inside the blob; the blob itself moves
-            struct.pack_into('>I', blob, 8, old_ptext - ic['start'] + data_off + len(body))
+        if ic.get('replaced'):
+            new_blobs_all = True
+            w, h = struct.unpack('>2h', blob[22:26]); msize = ((w+15)//16)*2*h
+            struct.pack_into('>I', blob, 8, data_off + len(body) + 34 + 4 + 2*msize)
+        else:
+            old_ptext = struct.unpack('>I', blob[8:12])[0]
+            if old_ptext:
+                # name sits at the same place inside the blob; the blob itself moves
+                struct.pack_into('>I', blob, 8, old_ptext - ic['start'] + data_off + len(body))
         body += bytes(blob)
     for blob in new_blobs:
         blob = bytearray(blob)
@@ -160,43 +181,58 @@ def rebuild_rsc(d, P, new_blobs):
     out += body + P['tail']
     return bytes(out)
 
-def main(rsc, svgdir, outdir):
+def main(rsc, svgdir, outdir, size=32):
+    size = int(size)
     d = open(rsc, 'rb').read()
     P = parse(d); pal = palette(P['tail'])
     os.makedirs(outdir, exist_ok=True)
     names = [ic['name'] for ic in P['icons']]
-    print('existing icons:', len(names))
-    # 1. new icons into the resource
+    print('existing icons:', len(names), 'target size', size)
+    # icon cell for this size: label below, 16px label font from 48 up
+    cell = (size * 2, size + (8 if size <= 32 else 16), 8 if size <= 32 else 16)
+    tmpl = P['icons'][1]['ib']
+    def make(nm, w, h):
+        svg = os.path.join(svgdir, nm.replace(' ', '_') + '.svg')
+        im = fit(render(svg, min(w, h)), w, h)
+        return make_icon_blob(nm, im, pal, tmpl, cell if size != 32 else None)
+    # 1. the resource: at 32 the originals stay and six are appended; at any
+    #    other size every icon is re-rendered from the SVG at that size
     new_blobs = []; new_icons = []
     for nm in NEW:
-        svg = os.path.join(svgdir, nm.replace(' ', '_') + '.svg')
-        im = fit(render(svg, 32), 32, 32)
-        blob, mono, mask = make_icon_blob(nm, im, pal, P['icons'][1]['ib'])
-        new_blobs.append(blob); new_icons.append(dict(name=nm, w=32, h=32, mono=mono, mask=mask))
-    open(os.path.join(outdir, 'cicons.rsc'), 'wb').write(rebuild_rsc(d, P, new_blobs))
+        blob, mono, mask = make(nm, size, size)
+        new_blobs.append(blob); new_icons.append(dict(name=nm, w=size, h=size, mono=mono, mask=mask))
+    if size == 32:
+        open(os.path.join(outdir, 'cicons.rsc'), 'wb').write(rebuild_rsc(d, P, new_blobs))
+    else:
+        all_blobs = []
+        for ic in P['icons']:
+            w = ic['w'] * size // 32 if ic['w'] != ic['h'] else size    # RAM disk stays wide
+            blob, mono, mask = make(ic['name'], w, size)
+            all_blobs.append(blob); ic.update(w=w, h=size, mono=mono, mask=mask)
+        open(os.path.join(outdir, 'cicons.rsc'), 'wb').write(rebuild_rsc(d, P, new_blobs, all_blobs, (cell[0], cell[1])))
     # sanity: re-parse the output
     P2 = parse(open(os.path.join(outdir, 'cicons.rsc'), 'rb').read())
     print('rebuilt resource:', len(P2['icons']), 'icons,', P2['hdr'][10], 'objects')
     # 2. the ARGB sets, keyed by hash
     all_icons = P['icons'] + new_icons
-    for size in (32, 48, 64):
+    for bsize in ((32, 48, 64) if size == 32 else (size,)):
         entries = []; data = b''
         for ic in all_icons:
             svg = os.path.join(svgdir, ic['name'].replace(' ', '_') + '.svg')
-            w = ic['w'] * size // 32; h = ic['h'] * size // 32
-            im = fit(render(svg, size), w, h)
+            w = ic['w'] * bsize // size; h = ic['h'] * bsize // size
+            im = fit(render(svg, min(w, h)), w, h)
             key = fnv1a(ic['mask'] + ic['mono'])
             entries.append((key, w, h, len(data))); data += im.tobytes()
-        hdr = struct.pack('>4sHHHH', b'APJI', 1, len(entries), size, 0)
+        hdr = struct.pack('>4sHHHH', b'APJI', 1, len(entries), bsize, 0)
         tab_size = len(entries) * 12
         out = bytearray(hdr)
         base = len(hdr) + tab_size
         for key, w, h, off in entries: out += struct.pack('>IHHI', key, w, h, base + off)
         out += data
-        fn = os.path.join(outdir, 'apjicons-%d.bin' % size)
+        fn = os.path.join(outdir, 'apjicons-%d.bin' % bsize)
         open(fn, 'wb').write(out); print(fn, len(out), 'bytes')
     json.dump([dict(name=ic['name'], hash='%08x' % fnv1a(ic['mask']+ic['mono'])) for ic in all_icons],
               open(os.path.join(outdir, 'icons.json'), 'w'), indent=1)
 
 if __name__ == '__main__':
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
