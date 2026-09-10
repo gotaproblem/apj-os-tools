@@ -59,7 +59,7 @@ def build(cw, ch, pt):
     baseline = ytop + asc
     top = baseline; ascent = baseline - 1; half = baseline - (asc * 5 // 10); descent = ch - 1 - baseline; bottom = descent
     name = ("APJ Mono %d" % pt).encode('ascii').ljust(32, b'\0')
-    flags = 0x0001 | 0x0004 | 0x0008           # system font, image data in Motorola order, monospaced
+    flags = 0x0001 | 0x0008                    # system font, monospaced - same as the stock Atari .FNTs (no 0x0004)
     # The GEM .FNT header and the character offset table are in INTEL (little-
     # endian) byte order - the format is DRI's PC one.  fVDI's load_font()
     # unconditionally byte-swaps the header words/longs and the offset table
