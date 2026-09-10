@@ -1,0 +1,178 @@
+{
+ "FLOPPY": [
+  "devices/media-floppy",
+  48
+ ],
+ "HARD DISC": [
+  "devices/drive-harddisk",
+  48
+ ],
+ "CD-ROM": [
+  "devices/media-optical",
+  48
+ ],
+ "RAMDISK": [
+  "devices/media-flash",
+  48
+ ],
+ "HARD DISK 2": [
+  "devices/drive-harddisk-system",
+  48
+ ],
+ "HARD DISK 3": [
+  "devices/drive-harddisk-ieee1394",
+  48
+ ],
+ "REMOVABLE": [
+  "devices/drive-removable-media",
+  48
+ ],
+ "FOLDER": [
+  "places/folder",
+  48
+ ],
+ "GEMSYS": [
+  "places/folder-blue-activities",
+  48
+ ],
+ "MAGIC FOLDER": [
+  "places/folder-violet",
+  48
+ ],
+ "MINT FOLDER": [
+  "places/folder-green",
+  48
+ ],
+ "UP": [
+  "actions/go-up",
+  24
+ ],
+ "DOWNLOAD": [
+  "actions/download",
+  24
+ ],
+ "UPLOAD": [
+  "actions/upload",
+  24
+ ],
+ "FONTS": [
+  "places/folder-blue-documents",
+  48
+ ],
+ "FILE": [
+  "mimetypes/unknown",
+  48
+ ],
+ "TEXT FILE": [
+  "mimetypes/text-x-generic",
+  48
+ ],
+ "HELP FILE": [
+  "mimetypes/text-x-readme",
+  48
+ ],
+ "FONT FILE": [
+  "mimetypes/application-x-font-ttf",
+  48
+ ],
+ "PACK FILE": [
+  "mimetypes/application-x-archive",
+  48
+ ],
+ "IMAGE FILE": [
+  "mimetypes/image-x-generic",
+  48
+ ],
+ "ACC": [
+  "mimetypes/application-x-addon",
+  48
+ ],
+ "APP": [
+  "mimetypes/application-x-executable",
+  48
+ ],
+ "GEM APP": [
+  "mimetypes/application-x-desktop",
+  48
+ ],
+ "TOS APP": [
+  "mimetypes/text-x-script",
+  48
+ ],
+ "PRX": [
+  "mimetypes/application-x-object",
+  48
+ ],
+ "TRASH": [
+  "places/user-trash",
+  48
+ ],
+ "PRINTER": [
+  "devices/printer",
+  48
+ ],
+ "MINT": [
+  "apps/utilities-terminal",
+  48
+ ],
+ "MAGIC": [
+  "apps/preferences-system",
+  48
+ ],
+ "WWW": [
+  "apps/web-browser",
+  48
+ ],
+ "PAINT": [
+  "apps/kolourpaint",
+  48
+ ],
+ "SEARCH": [
+  "actions/system-search",
+  24
+ ],
+ "VIEWER": [
+  "apps/multimedia-photo-viewer",
+  48
+ ],
+ "MAIL": [
+  "apps/internet-mail",
+  48
+ ],
+ "HELP": [
+  "apps/system-help",
+  48
+ ],
+ "INFORMATION": [
+  "status/dialog-information",
+  48
+ ],
+ "DISABLE": [
+  "status/dialog-error",
+  48
+ ],
+ "AUDIO FILE": [
+  "mimetypes/audio-x-generic",
+  48
+ ],
+ "VIDEO FILE": [
+  "mimetypes/video-x-generic",
+  48
+ ],
+ "MP3 PLAYER": [
+  "apps/multimedia-audio-player",
+  48
+ ],
+ "VIDEO PLAYER": [
+  "apps/multimedia-video-player",
+  48
+ ],
+ "SOURCE FILE": [
+  "mimetypes/text-x-csrc",
+  48
+ ],
+ "PDF FILE": [
+  "mimetypes/application-pdf",
+  48
+ ]
+}
