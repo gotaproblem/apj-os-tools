@@ -2,7 +2,7 @@
 
 Papirus icon theme (GPL-3.0, https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
 mapped onto TeraDesk's `cicons.rsc`, plus six icons TeraDesk never had
-(AUDIO FILE, VIDEO FILE, MP3 PLAYER, VIDEO PLAYER, SOURCE FILE, PDF FILE).
+(AUDIO FILE, VIDEO FILE, MP3 PLAYER, MP4 PLAYER, SOURCE FILE, PDF FILE).
 
     fetch.py                 pulls the mapped SVGs from Papirus into svg/ (needs network)
     mkicons.py RSC SVGDIR OUT  builds:
@@ -18,7 +18,7 @@ Install on the ST:
     out/apjicons-32.bin -> the XaAES folder (next to xaaes.cnf)
 
 Then in TeraDesk: Options -> Install icon, assign *.MP3 -> AUDIO FILE,
-*.MP4 -> VIDEO FILE, etc., and put MP3 PLAYER / VIDEO PLAYER on the
+*.MP4 -> VIDEO FILE, etc., and put MP3 PLAYER / MP4 PLAYER on the
 desktop for MP3GEM.PRG / VIDGEM.PRG.
 
 Requires: python3, cairosvg, Pillow.

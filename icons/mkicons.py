@@ -21,7 +21,7 @@ import cairosvg
 from PIL import Image
 
 # TeraDesk's icon names in cicons.rsc order, then the ones we add
-NEW = ["AUDIO FILE", "VIDEO FILE", "MP3 PLAYER", "VIDEO PLAYER", "SOURCE FILE", "PDF FILE"]
+NEW = ["AUDIO FILE", "VIDEO FILE", "MP3 PLAYER", "MP4 PLAYER", "SOURCE FILE", "PDF FILE"]   # names: 11 chars max
 
 def fnv1a(b):
     h = 0x811C9DC5
@@ -41,6 +41,7 @@ def parse(d):
         if v == -1: break
         counts.append(v)
     icons = []
+    icon0_off = p
     for n in counts:
         start = p
         ib = struct.unpack('>3I11h', d[p:p+34]); p += 34
@@ -53,10 +54,10 @@ def parse(d):
             cic = struct.unpack('>5i', d[p:p+20]); p += 20
             p += msize*npl + msize
             if cic[2]: p += msize*npl + msize
-        icons.append(dict(name=text, w=w, h=hh, mono=mono, mask=mask, blob=d[start:p], ib=ib))
+        icons.append(dict(name=text, w=w, h=hh, mono=mono, mask=mask, blob=d[start:p], ib=ib, start=start))
     data_end = p
     tail = d[data_end:]          # palette extension etc. - kept verbatim
-    return dict(hdr=h, objs=objs, ext=ext, counts=counts, icons=icons, tail=tail, tail_off=data_end)
+    return dict(hdr=h, objs=objs, ext=ext, counts=counts, icons=icons, tail=tail, tail_off=data_end, icon0_off=icon0_off)
 
 def palette(tail):
     pal = []
@@ -133,7 +134,22 @@ def rebuild_rsc(d, P, new_blobs):
     tab_off = ext_off + 16
     data_off = tab_off + (len(counts)+1)*4
     ext = P['ext'][:]; ext[1] = tab_off
-    body = b''.join(ic['blob'] for ic in P['icons']) + b''.join(new_blobs)
+    # ICONBLK.ib_ptext is an absolute file offset to the 12-byte name that
+    # follows the mono mask inside each blob: every icon moves, so patch it
+    body = b''
+    for ic in P['icons']:
+        blob = bytearray(ic['blob'])
+        old_ptext = struct.unpack('>I', blob[8:12])[0]
+        if old_ptext:
+            # name sits at the same place inside the blob; the blob itself moves
+            struct.pack_into('>I', blob, 8, old_ptext - ic['start'] + data_off + len(body))
+        body += bytes(blob)
+    for blob in new_blobs:
+        blob = bytearray(blob)
+        w, h = struct.unpack('>2h', blob[22:26])
+        msize = ((w+15)//16)*2*h
+        struct.pack_into('>I', blob, 8, data_off + len(body) + 34 + 4 + 2*msize)
+        body += bytes(blob)
     tail_off = data_off + len(body)
     if ext[2]: ext[2] = tail_off                  # palette extension follows the icons
     ext[0] = tail_off + len(P['tail'])

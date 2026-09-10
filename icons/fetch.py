@@ -17,7 +17,7 @@ MAP = {
  "VIEWER":["apps/multimedia-photo-viewer","apps/image-viewer","apps/gwenview"], "MAIL":["apps/internet-mail"],
  "HELP":["apps/system-help","apps/help-browser"], "INFORMATION":["status/dialog-information"], "DISABLE":["status/dialog-error","actions/dialog-cancel"],
  "AUDIO FILE":["mimetypes/audio-x-generic","mimetypes/audio-mpeg"], "VIDEO FILE":["mimetypes/video-x-generic","mimetypes/video-mp4"],
- "MP3 PLAYER":["apps/multimedia-audio-player","apps/audio-player"], "VIDEO PLAYER":["apps/multimedia-video-player","apps/video-player"],
+ "MP3 PLAYER":["apps/multimedia-audio-player","apps/audio-player"], "MP4 PLAYER":["apps/multimedia-video-player","apps/video-player"],
  "SOURCE FILE":["mimetypes/text-x-csrc","mimetypes/text-x-c"], "PDF FILE":["mimetypes/application-pdf"],
 }
 def get(url):
