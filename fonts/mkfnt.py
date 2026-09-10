@@ -59,7 +59,10 @@ def build(cw, ch, pt):
     baseline = ytop + asc
     top = baseline; ascent = baseline - 1; half = baseline - (asc * 5 // 10); descent = ch - 1 - baseline; bottom = descent
     name = ("APJ Mono %d" % pt).encode('ascii').ljust(32, b'\0')
-    flags = 0x0001 | 0x0008                    # system font, monospaced
+    flags = 0x0001 | 0x0004 | 0x0008           # system font, Motorola byte order, monospaced
+    # (0x0004: fVDI and GEM treat a font WITHOUT this flag as Intel-ordered and
+    #  byte-swap every word of it on load - which turned the first version
+    #  into garbage and took the screen with it)
     hdr_len = 88
     off_tab_len = (256 + 1) * 2
     hdr = struct.pack('>hh32shhhhhhhhhhhhhhhhIIIhhI',
