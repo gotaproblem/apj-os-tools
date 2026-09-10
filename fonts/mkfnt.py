@@ -59,19 +59,23 @@ def build(cw, ch, pt):
     baseline = ytop + asc
     top = baseline; ascent = baseline - 1; half = baseline - (asc * 5 // 10); descent = ch - 1 - baseline; bottom = descent
     name = ("APJ Mono %d" % pt).encode('ascii').ljust(32, b'\0')
-    flags = 0x0001 | 0x0004 | 0x0008           # system font, Motorola byte order, monospaced
-    # (0x0004: fVDI and GEM treat a font WITHOUT this flag as Intel-ordered and
-    #  byte-swap every word of it on load - which turned the first version
-    #  into garbage and took the screen with it)
+    flags = 0x0001 | 0x0004 | 0x0008           # system font, image data in Motorola order, monospaced
+    # The GEM .FNT header and the character offset table are in INTEL (little-
+    # endian) byte order - the format is DRI's PC one.  fVDI's load_font()
+    # unconditionally byte-swaps the header words/longs and the offset table
+    # (engine/fonts.c: fixup_font(header, buffer, ~(flags & FONTF_BIGENDIAN)) -
+    # '~' of anything is non-zero, so it always flips).  The bitmap rows are
+    # plain bytes and are never swapped.  A big-endian header therefore loads
+    # as garbage (height 0x1800 ...) and takes the screen with it.
     hdr_len = 88
     off_tab_len = (256 + 1) * 2
-    hdr = struct.pack('>hh32shhhhhhhhhhhhhhhhIIIhhI',
+    hdr = struct.pack('<hh32shhhhhhhhhhhhhhhhIIIhhI',
         1, pt, name, 0, 255,
         top, ascent, half, descent, bottom,
         cw, cw, 0, 0, 1, 1, 0x5555, 0x5555, flags,
         0, hdr_len, hdr_len + off_tab_len, form_w, ch, 0)
     assert len(hdr) == 88, len(hdr)
-    offs = b''.join(struct.pack('>H', c * cw) for c in range(257))
+    offs = b''.join(struct.pack('<H', c * cw) for c in range(257))
     return hdr + offs + rows, size
 
 out = sys.argv[1]; os.makedirs(out, exist_ok=True)
