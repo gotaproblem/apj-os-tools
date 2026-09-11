@@ -46,6 +46,8 @@ static void kf(void *p){ nalloc--; free(p); }
 #define kfree kf
 #define DIAGS(x)
 short apj_window_fluent(struct xa_window *w){ return w->fluent; }
+short apj_round_radius(void);
+short apj_round_steps(short r, const short **inset);
 short apj_corner_steps(struct xa_window *wind, const short **inset);
 short apj_corner_rows(struct xa_window *wind, const short **inset, short *nt, short *nb);
 bool xa_rect_clip(const GRECT *s, const GRECT *d, GRECT *r);
