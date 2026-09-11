@@ -608,40 +608,11 @@ static int load_dir(const char *d)
     return ntracks;
 }
 
-static void do_open(void)
+/* Load the folder of path (last component a file or mask) as the playlist
+ * and start fname in it */
+static void open_in_dir(const char *fpath, const char *fname)
 {
-    /* BOTH of these are written by the AES, not by us, and the AES decides how
-     * much to write - there is no length argument in fsel_exinput(). Under
-     * MiNT a long filename off a HOSTFS share will happily run past 64 bytes.
-     * These used to be 256 and 64 respectively, and fname was on the STACK,
-     * so selecting a long name overwrote the return address and the emulator
-     * died with a wild guest pointer whose value was the tail of the filename.
-     * Both are now static and generously sized. */
-    static char fpath[PATHLEN] = "";
-    static char fname[NAMELEN] = "";
-    short btn = 0;
     int i;
-
-    fname[0] = '\0';
-    if (!fpath[0]) {
-        fpath[0] = (char)('A' + Dgetdrv());
-        strcpy(fpath + 1, ":\\*.*");
-    }
-
-    /* The overlay is a HARDWARE plane: it composites above the entire Atari
-     * screen, so anything GEM draws underneath it is invisible - including the
-     * file selector, which would otherwise open behind a paused picture with
-     * no way to see what you are clicking. Put the picture away for the
-     * duration of the dialog; playback (and the sound) carry on. */
-    nf_call(vidid | NF_VID_RECT, 0L, 0L, -1L, -1L);
-
-    fsel_exinput(fpath, fname, &btn, "Select a video (HOSTFS drive)");
-
-    if (btn != 1 || !fname[0]) {
-        update_rect();            /* cancelled - put the picture back */
-        redraw(draw_all, wx, wy, ww, wh);
-        return;
-    }
 
     strncpy(dir, fpath, sizeof(dir) - 1);
     dir[sizeof(dir) - 1] = '\0';
@@ -680,6 +651,72 @@ static void do_open(void)
         moff = 0;
     }
     redraw(draw_all, wx, wy, ww, wh);
+}
+
+static void do_open(void)
+{
+    /* BOTH of these are written by the AES, not by us, and the AES decides how
+     * much to write - there is no length argument in fsel_exinput(). Under
+     * MiNT a long filename off a HOSTFS share will happily run past 64 bytes.
+     * These used to be 256 and 64 respectively, and fname was on the STACK,
+     * so selecting a long name overwrote the return address and the emulator
+     * died with a wild guest pointer whose value was the tail of the filename.
+     * Both are now static and generously sized. */
+    static char fpath[PATHLEN] = "";
+    static char fname[NAMELEN] = "";
+    short btn = 0;
+
+    fname[0] = '\0';
+    if (!fpath[0]) {
+        fpath[0] = (char)('A' + Dgetdrv());
+        strcpy(fpath + 1, ":\\*.*");
+    }
+
+    /* The overlay is a HARDWARE plane: it composites above the entire Atari
+     * screen, so anything GEM draws underneath it is invisible - including the
+     * file selector, which would otherwise open behind a paused picture with
+     * no way to see what you are clicking. Put the picture away for the
+     * duration of the dialog; playback (and the sound) carry on. */
+    nf_call(vidid | NF_VID_RECT, 0L, 0L, -1L, -1L);
+
+    fsel_exinput(fpath, fname, &btn, "Select a video (HOSTFS drive)");
+
+    if (btn != 1 || !fname[0]) {
+        update_rect();            /* cancelled - put the picture back */
+        redraw(draw_all, wx, wy, ww, wh);
+        return;
+    }
+
+    open_in_dir(fpath, fname);
+}
+
+/* A file handed to us - on the command line (double-clicked in the desktop,
+ * which runs VIDGEM for video types) or in a VA_START while running:
+ * "S:\\MEDIA\\CLIP.MP4", possibly quoted. Its folder becomes the playlist. */
+static void play_path(const char *arg)
+{
+    static char full[PATHLEN];
+    char *bs;
+    size_t n;
+
+    while (*arg == ' ')
+        arg++;
+    if (*arg == '\'') {
+        arg++;
+        strncpy(full, arg, sizeof(full) - 1);
+        full[sizeof(full) - 1] = '\0';
+        if ((bs = strchr(full, '\'')) != NULL)
+            *bs = '\0';
+    } else {
+        strncpy(full, arg, sizeof(full) - 1);
+        full[sizeof(full) - 1] = '\0';
+    }
+    n = strlen(full);
+    while (n > 0 && (full[n - 1] == ' ' || full[n - 1] == '\r' || full[n - 1] == '\n'))
+        full[--n] = '\0';
+    if ((bs = strrchr(full, '\\')) == NULL || !bs[1])
+        return;
+    open_in_dir(full, bs + 1);
 }
 
 /* ------------------------------------------------------------- actions --- */
@@ -783,7 +820,10 @@ static void click(short mx, short my)
 
 /* ---------------------------------------------------------------- main --- */
 
-int main(void)
+#define VA_START    0x4711     /* AV protocol: open these files */
+#define AV_STARTED  0x4738
+
+int main(int argc, char *argv[])
 {
     short work_in[11], work_out[57];
     short d, msg[8];
@@ -864,6 +904,9 @@ int main(void)
     }
     redraw(draw_all, wx, wy, ww, wh);
 
+    if (argc > 1)                         /* a file double-clicked in the desktop */
+        play_path(argv[1]);
+
     for (;;) {
         ev = evnt_multi(MU_MESAG | MU_BUTTON | MU_KEYBD | MU_TIMER,
                         1, 1, 1,
@@ -900,6 +943,19 @@ int main(void)
                 }
                 case WM_CLOSED:
                     goto out;
+                case VA_START: {          /* opened again while running */
+                    short reply[8];
+                    char *cmd = (char *)(((long)msg[3] << 16) | (unsigned short)msg[4]);
+                    if (cmd)
+                        play_path(cmd);
+                    wind_set(win, WF_TOP, 0, 0, 0, 0);
+                    update_rect();
+                    reply[0] = AV_STARTED; reply[1] = gl_apid; reply[2] = 0;
+                    reply[3] = msg[3]; reply[4] = msg[4];
+                    reply[5] = reply[6] = reply[7] = 0;
+                    appl_write(msg[1], 16, reply);
+                    break;
+                }
             }
         }
         if (ev & MU_BUTTON)

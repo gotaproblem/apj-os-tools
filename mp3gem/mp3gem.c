@@ -275,6 +275,26 @@ static int load_dir(const char *d)
     return ntracks;
 }
 
+/* Load the folder of path (a GEMDOS path whose last component is a file or
+ * mask) as the playlist and start fname in it */
+static void open_in_dir(const char *path, const char *fname)
+{
+    strncpy(dir, path, sizeof(dir) - 1);
+    dir[sizeof(dir) - 1] = '\0';
+    { char *bs = strrchr(dir, '\\'); if (bs) *bs = '\0'; }
+
+    if (load_dir(dir) > 0) {
+        for (int i = 0; i < ntracks; i++)
+            if (strcasecmp(list[i], fname) == 0) { sel = i; break; }
+        if (sel < top) top = sel;
+        if (sel >= top + VISROWS) top = sel - VISROWS + 1;
+        start_track(sel);
+    }
+    redraw(draw_all, wx, wy, ww, wh);
+}
+
+static void play_path(const char *arg);
+
 static void do_open(void)
 {
     static char fpath[256] = "";
@@ -290,16 +310,35 @@ static void do_open(void)
         return;
 
     /* dir = path up to the last backslash */
-    strncpy(dir, fpath, sizeof(dir) - 1);
-    dir[sizeof(dir) - 1] = '\0';
-    { char *bs = strrchr(dir, '\\'); if (bs) *bs = '\0'; }
+    open_in_dir(fpath, fname);
+}
 
-    if (load_dir(dir) > 0) {
-        for (int i = 0; i < ntracks; i++)
-            if (strcasecmp(list[i], fname) == 0) { sel = i; break; }
-        start_track(sel);
+/* A file handed to us - on the command line (double-clicked in the desktop,
+ * which runs MP3GEM for *.MP3) or in a VA_START while running: "S:\MUSIC\A.MP3",
+ * possibly quoted. Its folder becomes the playlist and it starts playing. */
+static void play_path(const char *arg)
+{
+    char full[256], *bs;
+    size_t n;
+
+    while (*arg == ' ')
+        arg++;
+    if (*arg == '\'') {
+        arg++;
+        strncpy(full, arg, sizeof(full) - 1);
+        full[sizeof(full) - 1] = '\0';
+        if ((bs = strchr(full, '\'')) != NULL)
+            *bs = '\0';
+    } else {
+        strncpy(full, arg, sizeof(full) - 1);
+        full[sizeof(full) - 1] = '\0';
     }
-    redraw(draw_all, wx, wy, ww, wh);
+    n = strlen(full);
+    while (n > 0 && (full[n - 1] == ' ' || full[n - 1] == '\r' || full[n - 1] == '\n'))
+        full[--n] = '\0';
+    if ((bs = strrchr(full, '\\')) == NULL || !bs[1])
+        return;
+    open_in_dir(full, bs + 1);
 }
 
 /* ------------------------------------------------------------- actions --- */
@@ -367,7 +406,10 @@ static void click(short mx, short my)
 
 /* ---------------------------------------------------------------- main --- */
 
-int main(void)
+#define VA_START    0x4711     /* AV protocol: open these files */
+#define AV_STARTED  0x4738
+
+int main(int argc, char *argv[])
 {
     short work_in[11], work_out[57];
     short d, msg[8];
@@ -405,6 +447,9 @@ int main(void)
     }
     redraw(draw_all, wx, wy, ww, wh);
 
+    if (argc > 1)                         /* a file double-clicked in the desktop */
+        play_path(argv[1]);
+
     for (;;) {
         ev = evnt_multi(MU_MESAG | MU_BUTTON | MU_KEYBD | MU_TIMER,
                         1, 1, 1,
@@ -427,6 +472,18 @@ int main(void)
                     break;
                 case WM_CLOSED:
                     goto out;
+                case VA_START: {          /* opened again while running */
+                    short reply[8];
+                    char *cmd = (char *)(((long)msg[3] << 16) | (unsigned short)msg[4]);
+                    if (cmd)
+                        play_path(cmd);
+                    wind_set(win, WF_TOP, 0, 0, 0, 0);
+                    reply[0] = AV_STARTED; reply[1] = gl_apid; reply[2] = 0;
+                    reply[3] = msg[3]; reply[4] = msg[4];
+                    reply[5] = reply[6] = reply[7] = 0;
+                    appl_write(msg[1], 16, reply);
+                    break;
+                }
             }
         }
         if (ev & MU_BUTTON)
