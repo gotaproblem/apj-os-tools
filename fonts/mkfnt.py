@@ -5,7 +5,8 @@ larger system-font sizes so the AES lays dialogs out bigger at 1080p.
 The AA atlases in XaAES render_apj cover the same cells (12x24, 16x32),
 so under a theme these bitmaps are only ever seen by legacy paths.
 
-    mkfnt.py OUTDIR      -> APJ15.FNT (12x24, 15pt)  APJ20.FNT (16x32, 20pt)
+    mkfnt.py OUTDIR      -> APJ11.FNT (9x18)  APJ12.FNT (10x20)  APJ13.FNT (11x22)
+                            APJ15.FNT (12x24)  APJ20.FNT (16x32)
 
 Format: GEM font header (88 bytes, Motorola byte order), char offset
 table, then the bitmap (all glyphs side by side, MSB = left pixel).
@@ -14,7 +15,7 @@ import struct, sys, os
 from PIL import Image, ImageFont, ImageDraw
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-SIZES = [(12, 24, 15), (16, 32, 20)]     # cell w, cell h, point size
+SIZES = [(9, 18, 11), (10, 20, 12), (11, 22, 13), (12, 24, 15), (16, 32, 20)]     # cell w, cell h, point size - every cell has an AA atlas in render_apj
 
 # Atari ST charset -> Unicode for 0x80..0xFF (CP437 is identical for the
 # accented Latin block that matters; the rest are best-effort)
