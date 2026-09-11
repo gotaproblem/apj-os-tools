@@ -22,3 +22,9 @@ Then in TeraDesk: Options -> Install icon, assign *.MP3 -> AUDIO FILE,
 desktop for MP3GEM.PRG / VIDGEM.PRG.
 
 Requires: python3, cairosvg, Pillow.
+
+FILE (TeraDesk's icon for any extension with no icon assigned) is a blank
+page, derived locally from TEXT_FILE.svg (the text lines removed), not
+Papirus `mimetypes/unknown` - a "?" on every .RSC/.INF looked broken.
+The original is kept as svg/FILE-unknown.svg; fetch.py would overwrite
+FILE.svg, so restore it from git after a fetch.
