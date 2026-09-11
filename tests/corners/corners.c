@@ -25,11 +25,34 @@ static struct { struct { struct xa_window *last; } open_nlwindows; } S;
 #define DIAGS(x)
 short apj_window_fluent(struct xa_window *w){ return w->fluent; }
 short apj_corner_steps(struct xa_window *wind, const short **inset);
+short apj_corner_rows(struct xa_window *wind, const short **inset, short *nt, short *nb);
+bool xa_rect_clip(const GRECT *s, const GRECT *d, GRECT *r);
 #include "rl.inc"
+bool
+xa_rect_clip(const GRECT *s, const GRECT *d, GRECT *r)
+{
+	if (s->g_w > 0 && s->g_h > 0 && d->g_w > 0 && d->g_h > 0)
+	{
+		const short w1 = s->g_x + s->g_w;
+		const short w2 = d->g_x + d->g_w;
+		const short h1 = s->g_y + s->g_h;
+		const short h2 = d->g_y + d->g_h;
+
+		r->g_x = s->g_x > d->g_x ? s->g_x : d->g_x;	//max(s->x, d->g_x);
+		r->g_y = s->g_y > d->g_y ? s->g_y : d->g_y;	//max(s->y, d->g_y);
+		r->g_w = (w1 < w2 ? w1 : w2) - r->g_x; 	//min(w1, w2) - d->g_x;
+		r->g_h = (h1 < h2 ? h1 : h2) - r->g_y;	//min(h1, h2) - d->g_y;
+
+		return ((r->g_w > 0) && (r->g_h > 0));
+	}
+	else
+		return false;
+}
+
 
 static unsigned short own[1080][1920];
 static void paint(struct xa_rect_list *l, int id){ for(;l;l=l->next) for(int y=l->r.g_y;y<l->r.g_y+l->r.g_h;y++) for(int x=l->r.g_x;x<l->r.g_x+l->r.g_w;x++){ if(own[y][x]){printf("OVERLAP at %d,%d (%d and %d)\n",x,y,own[y][x],id); exit(1);} own[y][x]=id; } }
-static struct xa_rect_list *mk(struct xa_window *w){ struct build_rl_parms p; memset(&p,0,sizeof p); p.getnxtrect=nextwind_rect; p.area=&w->r; p.ptr1=w->prev; p.nshape=apj_corner_wedges(w,p.shape); p.ishape=0; return build_rect_list(&p); }
+static struct xa_rect_list *mk(struct xa_window *w){ struct build_rl_parms p; memset(&p,0,sizeof p); p.getnxtrect=nextwind_rect; p.area=&w->r; p.ptr1=w->prev; p.nshape=apj_shape_rects(w,p.shape); p.ishape=0; return build_rect_list(&p); }
 static int count(struct xa_rect_list *l){int n=0; for(;l;l=l->next)n++; return n;}
 /* v api stub for outline */
 struct vapi { void (*line)(void*,short,short,short,short,short); };
@@ -44,10 +67,12 @@ int main(void){
   A.frame=B.frame=2; D.frame=-1; A.fluent=B.fluent=1; D.fluent=0;
   A.r=(GRECT){400,300,600,400}; B.r=(GRECT){200,200,500,300}; D.r=screen.r;
   A.prev=NULL; B.prev=&A; D.prev=&B;
+  A.wa=(GRECT){A.r.g_x+2, A.r.g_y+34, A.r.g_w-16, A.r.g_h-34-14};   /* title + h/v scrollbars */
+  B.wa=(GRECT){B.r.g_x+2, B.r.g_y+34, B.r.g_w-4,  B.r.g_h-34-2};    /* no scrollbars */
   const short *in; short n=apj_corner_steps(&A,&in);
   printf("r=8 steps n=%d:",n); for(int k=0;k<n;k++) printf(" %d",in[k]); printf("\n");
-  GRECT sh[APJ_SHAPE_MAX]; short ns=apj_shape_rects(&A,sh), nw=apj_corner_wedges(&A,sh+ns);
-  printf("shape rects %d, wedges %d\n", ns, nw);
+  GRECT sh[APJ_SHAPE_MAX]; short ns=apj_shape_rects(&A,sh);
+  printf("shape rects %d\n", ns);
   struct xa_rect_list *la=mk(&A), *lb=mk(&B), *ld=mk(&D);
   printf("rect counts: A %d  B %d  D %d\n", count(la),count(lb),count(ld));
   paint(la,1); paint(lb,2); paint(ld,3);
@@ -67,13 +92,26 @@ int main(void){
     for(int x=r.g_x;x<r.g_x+r.g_w;x++){pix[r.g_y][x]='#';pix[r.g_y+r.g_h-1][x]='#';}
     for(int y=r.g_y;y<r.g_y+r.g_h;y++){pix[y][r.g_x]='#';pix[y][r.g_x+r.g_w-1]='#';} }
   {
-    const short *in2; short n2=apj_corner_steps(wind,&in2), k; short x1=wind->r.g_x, x2=wind->r.g_x+wind->r.g_w-1, y1=wind->r.g_y, y2=wind->r.g_y+wind->r.g_h-1;
-    for(k=0;k<n2;k++){ short a=in2[k]; short b=(k?in2[k-1]-1:in2[k])+wind->frame-1; if(b<a+wind->frame-1)b=a+wind->frame-1;
-      line(v,x1+a,y1+k,x1+b,y1+k,1); line(v,x2-b,y1+k,x2-a,y1+k,1); line(v,x1+a,y2-k,x1+b,y2-k,1); line(v,x2-b,y2-k,x2-a,y2-k,1);} }
+    const short *in2; short nt,nb,k; apj_corner_rows(wind,&in2,&nt,&nb); short x1=wind->r.g_x, x2=wind->r.g_x+wind->r.g_w-1, y1=wind->r.g_y, y2=wind->r.g_y+wind->r.g_h-1;
+    for(k=0;k<nt||k<nb;k++){ short a=in2[k]; short b=(k?in2[k-1]-1:in2[k])+wind->frame-1; if(b<a+wind->frame-1)b=a+wind->frame-1;
+      if(k<nt){line(v,x1+a,y1+k,x1+b,y1+k,1); line(v,x2-b,y1+k,x2-a,y1+k,1);}
+      if(k<nb){line(v,x1+a,y2-k,x1+b,y2-k,1); line(v,x2-b,y2-k,x2-a,y2-k,1);} } }
   for(int corner=0;corner<2;corner++){
    printf(corner?"A bottom-right 12x12:\n":"A top-left 12x12:\n");
    for(int y=0;y<12;y++){ int yy= corner? A.r.g_y+A.r.g_h-12+y : A.r.g_y+y; for(int x=0;x<12;x++){ int xx= corner? A.r.g_x+A.r.g_w-12+x : A.r.g_x+x;
       putchar(own[yy][xx]!=1?'.':(pix[yy][xx]=='#'?'#':'a')); } putchar('\n'); }
+  }
+  /* B on top of the desktop, alone: how many rects does its WORK AREA get? */
+  {
+    struct xa_window B2=B; B2.prev=NULL;
+    struct xa_rect_list *l=mk(&B2); int n=0, pix=0;
+    for(;l;l=l->next){ GRECT c; short x1=l->r.g_x>B2.wa.g_x?l->r.g_x:B2.wa.g_x, y1=l->r.g_y>B2.wa.g_y?l->r.g_y:B2.wa.g_y;
+      short x2=(l->r.g_x+l->r.g_w<B2.wa.g_x+B2.wa.g_w)?l->r.g_x+l->r.g_w:B2.wa.g_x+B2.wa.g_w;
+      short y2=(l->r.g_y+l->r.g_h<B2.wa.g_y+B2.wa.g_h)?l->r.g_y+l->r.g_h:B2.wa.g_y+B2.wa.g_h;
+      if(x2>x1&&y2>y1){n++; pix+=(x2-x1)*(y2-y1);} (void)c; }
+    printf("window without bottom scrollbar: work area split into %d rect(s), %d of %d px (expect 1, all)\n", n, pix, B2.wa.g_w*B2.wa.g_h);
+    const short *i3; short nt,nb; apj_corner_rows(&B2,&i3,&nt,&nb); printf("B carved rows top %d bottom %d; A: ", nt, nb);
+    apj_corner_rows(&A,&i3,&nt,&nb); printf("top %d bottom %d\n", nt, nb);
   }
   return 0;
 }
