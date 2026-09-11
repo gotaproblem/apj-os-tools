@@ -57,6 +57,7 @@ static short vh;                          /* VDI handle */
 static short win = -1;
 static short cw, ch;                      /* char cell size */
 static short wx, wy, ww, wh;              /* window work area */
+static int   iconified = 0;               /* minimised: nothing of ours to draw */
 
 static char  dir[256]  = "";              /* playlist directory (GEMDOS path) */
 static char  list[MAXTRACKS][NAMELEN];
@@ -217,10 +218,18 @@ static void draw_all(void)
 }
 
 /* Walk the AES rectangle list, clip, and call fn for each visible part. */
+static void draw_iconic(void)
+{
+    apj_fill(vh, wx, wy, ww, wh, apj_pen(APJ_R_PANEL));
+}
+
 static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
 {
     short cl[4];
     GRECT r, d = { rx, ry, rw, rh };
+
+    if (iconified)                        /* only an icon box, if anything */
+        fn = draw_iconic;
 
     wind_update(BEG_UPDATE);
     graf_mouse(M_OFF, NULL);
@@ -438,9 +447,9 @@ int main(int argc, char *argv[])
         short dx, dy, dw, dh, cx, cy, cwid, chgt;
         short want_w = (MARQW + 2) * cw, want_h = (4 + VISROWS) * ch + 8;
         wind_get(0, WF_WORKXYWH, &dx, &dy, &dw, &dh);
-        wind_calc(WC_BORDER, NAME | CLOSER | MOVER,
+        wind_calc(WC_BORDER, NAME | CLOSER | MOVER | SMALLER,
                   dx + 16, dy + 16, want_w, want_h, &cx, &cy, &cwid, &chgt);
-        win = wind_create(NAME | CLOSER | MOVER, cx, cy, cwid, chgt);
+        win = wind_create(NAME | CLOSER | MOVER | SMALLER, cx, cy, cwid, chgt);
         wind_set_str(win, WF_NAME, "PiSTorm MP3");
         wind_open(win, cx, cy, cwid, chgt);
         update_work();
@@ -472,9 +481,27 @@ int main(int argc, char *argv[])
                     break;
                 case WM_CLOSED:
                     goto out;
+                case WM_ICONIFY:
+                case WM_ALLICONIFY:       /* minimise (to the taskbar under APJ-OS) */
+                    wind_set(win, WF_ICONIFY, msg[4], msg[5], msg[6], msg[7]);
+                    iconified = 1;
+                    update_work();
+                    break;
+                case WM_UNICONIFY:
+                    wind_set(win, WF_UNICONIFY, msg[4], msg[5], msg[6], msg[7]);
+                    iconified = 0;
+                    update_work();
+                    redraw(draw_all, wx, wy, ww, wh);
+                    break;
                 case VA_START: {          /* opened again while running */
                     short reply[8];
                     char *cmd = (char *)(((long)msg[3] << 16) | (unsigned short)msg[4]);
+                    if (iconified) {      /* bring the window back first */
+                        wind_set(win, WF_UNICONIFY, -1, -1, -1, -1);
+                        iconified = 0;
+                        update_work();
+                        redraw(draw_all, wx, wy, ww, wh);
+                    }
                     if (cmd)
                         play_path(cmd);
                     wind_set(win, WF_TOP, 0, 0, 0, 0);
@@ -486,7 +513,7 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        if (ev & MU_BUTTON)
+        if ((ev & MU_BUTTON) && !iconified)
             click(mx, my);
         if (ev & MU_KEYBD) {
             char c = (char)(kr & 0xff);
@@ -506,7 +533,8 @@ int main(int argc, char *argv[])
                 }
             }
             moff++;                       /* scroll marquee 4 chars/s */
-            redraw(draw_band, wx, wy, ww, 2 * ch);
+            if (!iconified)
+                redraw(draw_band, wx, wy, ww, 2 * ch);
             (void)tick;
         }
     }

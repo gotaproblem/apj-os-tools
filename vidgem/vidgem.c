@@ -84,6 +84,7 @@ static short vh;                          /* VDI handle */
 static short win = -1;
 static short cw, ch;                      /* char cell size */
 static short wx, wy, ww, wh;              /* window work area */
+static int   iconified = 0;               /* minimised: picture hidden, nothing to draw */
 static short scr_w, scr_h;                /* Atari screen size, pixels */
 static long  disp_w, disp_h;              /* real display size, pixels */
 
@@ -103,7 +104,7 @@ static long  min_dw = -1, min_dh = -1;   /* -1 unknown, 0 none, >0 the floor */
 static short min_out_w = 0, min_out_h = 0;   /* smallest usable window size */
 static int   floor_unfit = 0;   /* the floor is bigger than the desktop */
 
-#define WIN_KIND (NAME | CLOSER | MOVER | SIZER | FULLER)
+#define WIN_KIND (NAME | CLOSER | MOVER | SIZER | FULLER | SMALLER)
 static int   too_big = 0;                 /* picture cannot fit the window */
 
 static char  marquee[400] = "PiSTorm video - Open a file...   ";
@@ -213,6 +214,11 @@ static void update_rect(void)
 
     if (!vidid)
         return;
+
+    if (iconified) {                      /* minimised: the overlay must go too */
+        nf_call(vidid | NF_VID_RECT, 0L, 0L, -1L, -1L);
+        return;
+    }
 
     if (listmode) {
         nf_call(vidid | NF_VID_RECT, 0L, 0L, -1L, -1L);
@@ -539,10 +545,18 @@ static void draw_all(void)
 static void draw_band(void)   { draw_marquee(); draw_time(); }
 
 /* Walk the AES rectangle list, clip, and call fn for each visible part. */
+static void draw_iconic(void)
+{
+    apj_fill(vh, wx, wy, ww, wh, apj_pen(APJ_R_PANEL));
+}
+
 static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
 {
     short cl[4];
     GRECT r, d;
+
+    if (iconified)                        /* only an icon box, if anything */
+        fn = draw_iconic;
 
     d.g_x = rx; d.g_y = ry; d.g_w = rw; d.g_h = rh;
 
@@ -943,9 +957,28 @@ int main(int argc, char *argv[])
                 }
                 case WM_CLOSED:
                     goto out;
+                case WM_ICONIFY:
+                case WM_ALLICONIFY:       /* minimise (to the taskbar under APJ-OS) */
+                    iconified = 1;
+                    update_rect();        /* picture off first - it sits above GEM */
+                    wind_set(win, WF_ICONIFY, msg[4], msg[5], msg[6], msg[7]);
+                    update_work();
+                    break;
+                case WM_UNICONIFY:
+                    wind_set(win, WF_UNICONIFY, msg[4], msg[5], msg[6], msg[7]);
+                    iconified = 0;
+                    update_work();        /* puts the picture back */
+                    redraw(draw_all, wx, wy, ww, wh);
+                    break;
                 case VA_START: {          /* opened again while running */
                     short reply[8];
                     char *cmd = (char *)(((long)msg[3] << 16) | (unsigned short)msg[4]);
+                    if (iconified) {      /* bring the window back first */
+                        wind_set(win, WF_UNICONIFY, -1, -1, -1, -1);
+                        iconified = 0;
+                        update_work();
+                        redraw(draw_all, wx, wy, ww, wh);
+                    }
                     if (cmd)
                         play_path(cmd);
                     wind_set(win, WF_TOP, 0, 0, 0, 0);
@@ -958,7 +991,7 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        if (ev & MU_BUTTON)
+        if ((ev & MU_BUTTON) && !iconified)
             click(mx, my);
         if (ev & MU_KEYBD) {
             char c = (char)(kr & 0xff);
@@ -984,7 +1017,7 @@ int main(int argc, char *argv[])
             /* The overlay's minimum size only becomes known once the host has
              * decoded a frame, so keep asking until it answers, then lay the
              * window out for real. */
-            if (playing && min_dw < 0) {
+            if (playing && min_dw < 0 && !iconified) {
                 long w = nf_call(vidid | NF_VID_INFO, (long)VI_MIN_W);
                 long h = nf_call(vidid | NF_VID_INFO, (long)VI_MIN_H);
                 if (w >= 0 && h >= 0) {
@@ -1020,7 +1053,8 @@ int main(int argc, char *argv[])
                 }
             }
             moff++;                       /* scroll marquee 4 chars/s */
-            redraw(draw_band, wx, wy, ww, 2 * ch);
+            if (!iconified)
+                redraw(draw_band, wx, wy, ww, 2 * ch);
         }
     }
 
