@@ -3,6 +3,9 @@
 `mkfnt.py OUTDIR` renders DejaVu Sans Mono into GEM bitmap fonts at the
 larger system-font cells XaAES render_apj already has AA atlases for:
 
+    APJ11.FNT    9x18 cell, 11 pt
+    APJ12.FNT   10x20 cell, 12 pt
+    APJ13.FNT   11x22 cell, 13 pt
     APJ15.FNT   12x24 cell, 15 pt
     APJ20.FNT   16x32 cell, 20 pt
 
@@ -12,11 +15,14 @@ so to fVDI they are extra sizes of the system font.
 Install: copy to C:\GEMSYS (fVDI's PATH), then in fvdi.sys after the
 driver line:
 
+    s APJ11.FNT
+    s APJ12.FNT
+    s APJ13.FNT
     s APJ15.FNT
     s APJ20.FNT
 
 Then pick the size:
-  xaaes.cnf:  STANDARD_POINT = 15      (or 20)  - AES dialogs, menus, chrome
+  xaaes.cnf:  STANDARD_POINT = 12      (11, 12, 13, 15 or 20; reboot)  - AES dialogs, menus, chrome
   TeraDesk:   Options -> Fonts        - directory windows
 
 Under a theme the antialiased atlas is drawn instead of these bitmaps
