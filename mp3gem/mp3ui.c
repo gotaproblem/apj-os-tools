@@ -35,6 +35,30 @@ static void hhmmss(char *out, long s)
 		sprintf(out, "%ld:%02ld", s / 60L, s % 60L);
 }
 
+/*
+ * Three sizes out of the APJ*.FNT set fVDI loads (9x18 up to 16x32).
+ * Everything in one system-font cell is most of what made the first build
+ * look flat - a 20 pt title against 11 pt badges is the difference.
+ */
+enum { F_SMALL, F_BODY, F_TITLE };
+
+static void ui_font(short vh, short kind)
+{
+	static const short ladder[3][3] =	/* columns: 100%, 125%, 175% */
+	{
+		{ 10, 11, 13 },		/* small */
+		{ 11, 12, 15 },		/* body  */
+		{ 13, 15, 20 }		/* title */
+	};
+	short sc = apj_skin_ok() ? apj_skin_scale() : 100;
+	short col = (sc >= 175) ? 2 : ((sc >= 125) ? 1 : 0);
+	short d;
+
+	if (kind < 0 || kind > F_TITLE)
+		kind = F_BODY;
+	vst_point(vh, ladder[kind][col], &d, &d, &d, &d);
+}
+
 static short cellw(short vh)
 {
 	short a[10];
@@ -255,6 +279,7 @@ static void draw_seek(MP3UI *u, short vh)
 	apj_skin_blit(vh, APJ_RG_KNOB, state_of(u, W_SEEK, 0),
 	              (short) (l->x + fw - kn / 2), (short) (ty + th / 2 - kn / 2));
 
+	ui_font(vh, F_SMALL);
 	hhmmss(a, u->pos_s);
 	sprintf(b, "-%ld:%02ld", (u->len_s - u->pos_s) / 60L,
 	        (u->len_s - u->pos_s) % 60L);
@@ -316,12 +341,19 @@ static void draw_now(MP3UI *u, short vh)
 		         (short) (l->y + (l->h - u->artedge) / 2));
 
 	ix = (short) (l->x + l->w + M(GAPX));
-	apj_text(vh, ix, (short) (l->y + M(2)), apj_skin_pen(APJ_R_TEXT),
-	         u->title ? u->title : "");
-	apj_text(vh, ix, (short) (l->y + M(2) + ch + M(4)),
-	         apj_skin_pen(APJ_X_MUTED), u->sub ? u->sub : "");
 
-	by = (short) (l->y + M(2) + 2 * ch + M(12));
+	ui_font(vh, F_TITLE);
+	apj_text(vh, ix, (short) (l->y + M(4)), apj_skin_pen(APJ_R_TEXT),
+	         u->title ? u->title : "");
+	by = (short) (l->y + M(4) + cellh(vh) + M(4));
+
+	ui_font(vh, F_BODY);
+	apj_text(vh, ix, by, apj_skin_pen(APJ_X_MUTED), u->sub ? u->sub : "");
+	by = (short) (by + cellh(vh) + M(10));
+
+	ui_font(vh, F_SMALL);
+	cw = cellw(vh);
+	ch = cellh(vh);
 	if (u->codec)
 	{
 		short w = (short) (cw * (short) strlen(u->codec) + M(12));
@@ -360,9 +392,12 @@ static void draw_now(MP3UI *u, short vh)
 static void draw_list(MP3UI *u, short vh)
 {
 	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, W_LIST);
-	short r, iy, ch = cellh(vh), cw = cellw(vh), g = apj_skin_glyphsz();
+	short r, iy, ch, cw, g = apj_skin_glyphsz();
 	char tbuf[16];
 
+	ui_font(vh, F_BODY);
+	ch = cellh(vh);
+	cw = cellw(vh);
 	if (!l)
 		return;
 	apj_skin_9(vh, APJ_RG_GROUP, 0, l->x, l->y, l->w, l->h);
@@ -411,7 +446,10 @@ static void draw_list(MP3UI *u, short vh)
 static void draw_status(MP3UI *u, short vh)
 {
 	char buf[128];
-	short y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
+	short y;
+
+	ui_font(vh, F_SMALL);
+	y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
 
 	sprintf(buf, "%d tracks", (int) u->ntracks);
 	apj_text(vh, (short) (u->work.g_x + M(PAD)), y,
@@ -510,8 +548,9 @@ void mp3ui_draw(MP3UI *u, short vh)
 		draw_plain(u, vh);
 		return;
 	}
+	ui_font(vh, F_BODY);
 	apj_fill(vh, u->work.g_x, u->work.g_y, u->work.g_w, u->work.g_h,
-	         apj_pen(APJ_R_PANEL));
+	         apj_skin_pen(APJ_R_PANEL));
 	apj_skin_tilex(vh, APJ_RG_PANELTOP, 0, u->work.g_x, u->work.g_y,
 	               u->work.g_w);
 	draw_now(u, vh);
@@ -519,4 +558,5 @@ void mp3ui_draw(MP3UI *u, short vh)
 	draw_transport(u, vh);
 	draw_list(u, vh);
 	draw_status(u, vh);
+	ui_font(vh, F_BODY);
 }

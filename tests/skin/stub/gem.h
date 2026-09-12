@@ -53,6 +53,7 @@ void  v_bar(short h, short *xy);
 void  v_pline(short h, short n, short *xy);
 void  v_gtext(short h, short x, short y, char *s);
 void  vqt_attributes(short h, short *a);
+short vst_point(short h, short pt, short *cw, short *ch, short *bw, short *bh);
 long  appl_control(short ap, short what, void *p);
 short shel_read(char *cmd, char *tail);
 

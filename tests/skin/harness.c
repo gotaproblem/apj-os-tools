@@ -189,12 +189,31 @@ void v_bar(short h, short *xy)
 				put(x, y, px);
 }
 
+/* the APJ*.FNT set fVDI loads: point size -> cell */
+static short cur_cw = 10, cur_ch = 20;
+
+short vst_point(short h, short pt, short *cw, short *ch, short *bw, short *bh)
+{
+	static const short tbl[5][3] = { {11,9,18},{12,10,20},{13,11,22},
+	                                 {15,12,24},{20,16,32} };
+	int i, best = 1;
+	(void) h;
+	for (i = 0; i < 5; i++)
+		if (tbl[i][0] <= pt)
+			best = i;
+	cur_cw = tbl[best][1];
+	cur_ch = tbl[best][2];
+	*cw = *bw = cur_cw;
+	*ch = *bh = cur_ch;
+	return tbl[best][0];
+}
+
 void vqt_attributes(short h, short *a)
 {
 	(void) h;
 	memset(a, 0, 10 * sizeof(short));
-	a[8] = 10;      /* APJ12.FNT cell at 1920x1080 */
-	a[9] = 20;
+	a[8] = cur_cw;
+	a[9] = cur_ch;
 }
 
 /*

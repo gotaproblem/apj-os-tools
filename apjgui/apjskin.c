@@ -135,12 +135,26 @@ long apj_skin_rgb(short role)
 	return sk_pal[role] & 0xffffffL;
 }
 
+/*
+ * A pen for a role. The skin was baked against its own nineteen role
+ * colours and carries them in PALT, so it loads all of them into this
+ * workstation and answers from there - deferring to apj_pen() meant that
+ * on a desktop with no theme committed every role fell back to the classic
+ * G_* pens and the text came out black on a dark skin.
+ *
+ * XaAES's antialiased text path is the exception: it draws on the AES's own
+ * workstation, so it only ever sees the theme's pens. That is fine, because
+ * apj_text_aa() only takes that path when a theme IS loaded, and a skin
+ * follows the theme by name.
+ */
 short apj_skin_pen(short role)
 {
+	if (role < 0 || role >= APJ_X_N)
+		role = APJ_R_TEXT;
 	if (!sk_ok)
 		return apj_pen(role < APJ_R_N ? role : APJ_R_TEXT);
 	if (role < APJ_R_N)
-		return apj_pen(role);
+		return (short) (APJ_PEN_BASE + role);
 	return (short) (APJ_XPEN_BASE + (role - APJ_R_N));
 }
 
@@ -514,18 +528,26 @@ static long try_open(const char *dir, const char *file, char *out)
 	return h;
 }
 
+/*
+ * Load the skin's whole palette into this workstation: the nineteen roles
+ * at 237..255, where apjgui and XaAES also put them, and the six extras
+ * just below at 230..235. Without a theme these are the only correct
+ * colours the app has.
+ */
 static void put_pens(short vh)
 {
 	short i, rgbc[3];
 
-	for (i = APJ_R_N; i < APJ_X_N; i++)
+	for (i = 0; i < APJ_X_N; i++)
 	{
 		long c = sk_pal[i];
+		short pen = (i < APJ_R_N) ? (short) (APJ_PEN_BASE + i)
+		                          : (short) (APJ_XPEN_BASE + (i - APJ_R_N));
 
 		rgbc[0] = (short) ((((c >> 16) & 0xff) * 1000L + 127L) / 255L);
 		rgbc[1] = (short) ((((c >> 8) & 0xff) * 1000L + 127L) / 255L);
 		rgbc[2] = (short) (((c & 0xff) * 1000L + 127L) / 255L);
-		vs_color(vh, (short) (APJ_XPEN_BASE + (i - APJ_R_N)), rgbc);
+		vs_color(vh, pen, rgbc);
 	}
 }
 
