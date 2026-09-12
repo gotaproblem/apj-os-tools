@@ -446,6 +446,19 @@ static void draw_plain(MP3UI *u, short vh)
 
 	apj_fill(vh, u->work.g_x, u->work.g_y, u->work.g_w, u->work.g_h,
 	         apj_pen(APJ_R_PANEL));
+
+	/* Say why this is the plain look. Falling back silently made a missing
+	 * skin file indistinguishable from the app simply not being rebuilt. */
+	{
+		char why[256];
+
+		sprintf(why, "No skin: %s not in %s",
+		        apj_skin_wanted(), apj_skin_tried());
+		apj_text(vh, (short) (u->work.g_x + 2),
+		         (short) (u->work.g_y + u->work.g_h - ch),
+		         apj_pen(APJ_R_DISABLED), why);
+	}
+
 	apj_text(vh, (short) (u->work.g_x + 2), (short) (u->work.g_y + 2),
 	         apj_pen(APJ_R_TEXT), u->title ? u->title : "");
 	apj_text(vh, (short) (u->work.g_x + 2), (short) (u->work.g_y + 2 + ch),

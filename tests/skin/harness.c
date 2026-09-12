@@ -239,6 +239,15 @@ long Fseek(long off, short h, short m)  { return fseek(fp[h], off, m == 0 ? SEEK
 long Fclose(short h)                    { fclose(fp[h]); fp[h] = NULL; return 0; }
 short Dgetdrv(void)                     { return 2; }
 
+/* the harness runs from tests/skin, so point the engine's program-directory
+ * search at the built sheets */
+short shel_read(char *cmd, char *tail)
+{
+    strcpy(cmd, "../../skins/out/HARNESS.PRG");
+    tail[0] = 0;
+    return 1;
+}
+
 /* --------------------------------------------------------------- main -- */
 static const char *NAMES[] = {
 	"Main Titles", "Tears in Rain", "Love Theme", "Blade Runner Blues",

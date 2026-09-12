@@ -86,6 +86,8 @@ static short  sk_w, sk_h, sk_planes;
 static short  sk_tilew, sk_tileh, sk_accd;
 static short  sk_gsz, sk_gcols, sk_nglyph, sk_maskw;
 static char   sk_name[16] = "";
+static char   sk_wanted[24] = "";
+static char   sk_tried[240] = "";
 static struct reg sk_reg[APJ_RG_N];
 static long   sk_pal[APJ_X_N];
 static long  *sk_mid = NULL;	/* 2 longs per state: fill, border */
@@ -109,6 +111,8 @@ static unsigned long be32(const unsigned char *p)
 }
 
 short apj_skin_ok(void)      { return sk_ok; }
+const char *apj_skin_wanted(void) { return sk_wanted; }
+const char *apj_skin_tried(void)  { return sk_tried; }
 short apj_skin_scale(void)   { return sk_scale; }
 short apj_skin_tilew(void)   { return sk_tilew; }
 short apj_skin_tileh(void)   { return sk_tileh; }
@@ -472,12 +476,41 @@ static const char *theme_skin(void)
 	return "FLTD";
 }
 
-static long try_open(const char *dir, const char *stem, short scale, char *out)
+/*
+ * The folder the .PRG was started from. TeraDesk launches with the program
+ * directory as the working directory, but only for entries set that way, and
+ * an app started any other way would look in the wrong place - so ask the
+ * shell where we came from rather than trusting the cwd.
+ */
+static void progdir(char *out, long n)
+{
+	char cmd[160], tail[132], *bs;		/* cmd shorter than out: no truncation */
+
+	out[0] = '\0';
+	cmd[0] = '\0';
+	shel_read(cmd, tail);
+	if (!cmd[0])
+		return;
+	strncpy(out, cmd, (size_t) n - 1);
+	out[n - 1] = '\0';
+	bs = strrchr(out, '\\');
+	if (!bs)
+		bs = strrchr(out, '/');
+	if (bs)
+		bs[1] = '\0';
+	else
+		out[0] = '\0';
+}
+
+static long try_open(const char *dir, const char *file, char *out)
 {
 	long h;
+	long n = (long) strlen(sk_tried);
 
-	sprintf(out, "%s%s%d.SKN", dir, stem, (int) scale);
+	sprintf(out, "%s%s", dir, file);
 	h = Fopen(out, 0);
+	if (h < 0 && n < (long) sizeof(sk_tried) - 80)
+		sprintf(sk_tried + n, "%s%s", n ? "  " : "", dir[0] ? dir : ".\\");
 	return h;
 }
 
@@ -535,10 +568,27 @@ short apj_skin_load(short vh, const char *name)
 	}
 	else
 	{
+		char pd[192], sub[224];
+
 		scale = pick_scale(vh);
-		fh = try_open("SKINS\\", stem, scale, path);
+		sprintf(sk_wanted, "%s%d.SKN", stem, (int) scale);
+		sk_tried[0] = '\0';
+
+		progdir(pd, (long) sizeof(pd));
+		fh = -1;
+		if (pd[0])
+		{
+			sprintf(sub, "%sSKINS\\", pd);
+			fh = try_open(sub, sk_wanted, path);
+			if (fh < 0)
+				fh = try_open(pd, sk_wanted, path);
+		}
 		if (fh < 0)
-			fh = try_open("C:\\OPT\\GEM\\SKINS\\", stem, scale, path);
+			fh = try_open("SKINS\\", sk_wanted, path);
+		if (fh < 0)
+			fh = try_open("", sk_wanted, path);
+		if (fh < 0)
+			fh = try_open("C:\\OPT\\GEM\\SKINS\\", sk_wanted, path);
 	}
 	if (fh < 0)
 		return 0;

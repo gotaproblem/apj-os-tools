@@ -89,6 +89,11 @@ short apj_skin_reload(short vh);			/* after APJ_SKINCHG       */
 void  apj_skin_free(void);
 short apj_skin_ok(void);
 
+/* After a failed load: the file it wanted and the folders it looked in,
+ * so an app can say so on screen instead of silently looking unchanged. */
+const char *apj_skin_wanted(void);
+const char *apj_skin_tried(void);
+
 short apj_skin_scale(void);				/* 100, 125, 175           */
 short apj_skin_m(short pt);				/* points -> device pixels */
 short apj_skin_tilew(void);
