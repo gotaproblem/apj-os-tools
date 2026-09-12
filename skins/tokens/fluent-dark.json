@@ -1,0 +1,52 @@
+{
+  "name": "fluent-dark",
+  "file": "FLTD",
+  "title": "Fluent Dark",
+  "author": "APJ-OS",
+  "roles": {
+    "FACE": "#2b323a",
+    "TEXT": "#f0f4f8",
+    "LIGHT": "#3f4954",
+    "DARK": "#12161b",
+    "SELBG": "#0f3b57",
+    "SELFG": "#eaf6ff",
+    "ALBG": "#7a2f2a",
+    "ALFG": "#ffece9",
+    "PANEL": "#1f242b",
+    "TITBG": "#161b21",
+    "TITFG": "#e8eef5",
+    "PAPER": "#161b21",
+    "BORDER": "#39424d",
+    "HOVER": "#333b45",
+    "PRESSED": "#10202b",
+    "FOCUS": "#4cc2ff",
+    "DISABLED": "#6c7a89",
+    "ELEVATION": "#0a0d11",
+    "ACCENT": "#4cc2ff"
+  },
+  "extra": {
+    "ACCENT_INK": "#04212f",
+    "ACCENT_DEEP": "#2a9fe0",
+    "MUTED": "#94a2b1",
+    "PANEL_TOP": "#272d35",
+    "ROW": "#1c2229",
+    "HAIR": "#ffffff16"
+  },
+  "metrics": {
+    "radius_group": 6,
+    "radius_btn": 5,
+    "radius_badge": 3,
+    "radius_knob": 8,
+    "border": 1,
+    "rail": 3,
+    "seek_h": 6,
+    "knob": 12,
+    "glyph": 16,
+    "art": 96,
+    "btn_min": 24,
+    "btnacc": 38,
+    "paneltop_h": 48,
+    "badge_h": 16,
+    "row_h": 24
+  }
+}

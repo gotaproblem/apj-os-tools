@@ -105,9 +105,9 @@ void apj_init(short vh)
 	{
 		short rgb[3];
 
-		rgb[0] = (short) (((apj_rgb[i] >> 16) & 0xff) * 1000L / 255L);
-		rgb[1] = (short) (((apj_rgb[i] >>  8) & 0xff) * 1000L / 255L);
-		rgb[2] = (short) (( apj_rgb[i]        & 0xff) * 1000L / 255L);
+		rgb[0] = (short) ((((apj_rgb[i] >> 16) & 0xff) * 1000L + 127L) / 255L);
+		rgb[1] = (short) ((((apj_rgb[i] >>  8) & 0xff) * 1000L + 127L) / 255L);
+		rgb[2] = (short) ((( apj_rgb[i]        & 0xff) * 1000L + 127L) / 255L);
 		vs_color(vh, APJ_PEN_BASE + i, rgb);
 	}
 	apj_on = 1;

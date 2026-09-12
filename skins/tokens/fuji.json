@@ -1,0 +1,52 @@
+{
+  "name": "fuji",
+  "file": "FUJI",
+  "title": "Fuji",
+  "author": "APJ-OS",
+  "roles": {
+    "FACE": "#302623",
+    "TEXT": "#f5ece9",
+    "LIGHT": "#473935",
+    "DARK": "#140f0e",
+    "SELBG": "#4d1d17",
+    "SELFG": "#ffe9e4",
+    "ALBG": "#7d2a22",
+    "ALFG": "#ffe9e4",
+    "PANEL": "#221b19",
+    "TITBG": "#181211",
+    "TITFG": "#f2e6e2",
+    "PAPER": "#181211",
+    "BORDER": "#453835",
+    "HOVER": "#3a2e2b",
+    "PRESSED": "#1c1413",
+    "FOCUS": "#c8382f",
+    "DISABLED": "#7c6a66",
+    "ELEVATION": "#0c0807",
+    "ACCENT": "#c8382f"
+  },
+  "extra": {
+    "ACCENT_INK": "#fff3f1",
+    "ACCENT_DEEP": "#a32b23",
+    "MUTED": "#ab9792",
+    "PANEL_TOP": "#2b2220",
+    "ROW": "#1e1716",
+    "HAIR": "#ffece614"
+  },
+  "metrics": {
+    "radius_group": 6,
+    "radius_btn": 5,
+    "radius_badge": 3,
+    "radius_knob": 8,
+    "border": 1,
+    "rail": 3,
+    "seek_h": 6,
+    "knob": 12,
+    "glyph": 16,
+    "art": 96,
+    "btn_min": 24,
+    "btnacc": 38,
+    "paneltop_h": 48,
+    "badge_h": 16,
+    "row_h": 24
+  }
+}

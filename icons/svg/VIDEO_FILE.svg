@@ -1,7 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" version="1">
- <path style="opacity:0.2" d="M 44,41 V 9 C 44,7.892 43.108,7 42,7 H 6 C 4.892,7 4,7.892 4,9 v 32 c 0,1.108 0.892,2 2,2 h 36 c 1.108,0 2,-0.892 2,-2 z"/>
- <path style="fill:#7282d9" d="M 44,40 V 8 C 44,6.892 43.108,6 42,6 H 6 C 4.892,6 4,6.892 4,8 v 32 c 0,1.108 0.892,2 2,2 h 36 c 1.108,0 2,-0.892 2,-2 z"/>
- <path style="opacity:0.2;fill:#ffffff" d="M 6,6 C 4.892,6 4,6.892 4,8 V 9 C 4,7.892 4.892,7 6,7 h 36 c 1.108,0 2,0.892 2,2 V 8 C 44,6.892 43.108,6 42,6 Z"/>
- <path style="opacity:0.2" d="m 16,18 h 13 c 1,0 1,1 1,1 v 12 c 0,1 -1,1 -1,1 H 16.003 c 0,0 -1,0 -1,-1 V 19 c 0,0 0,-1 1,-1 z m 19.997,1.5 V 31 l -6,-6 z"/>
- <path style="fill:#ffffff" d="m 16,17 h 13 c 1,0 1,1 1,1 v 12 c 0,1 -1,1 -1,1 H 16.003 c 0,0 -1,0 -1,-1 V 18 c 0,0 0,-1 1,-1 z m 19.997,1.5 V 30 l -6,-6 z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#37b6e8"/><stop offset="1" stop-color="#0e63b4"/>
+    </linearGradient>
+    <linearGradient id="g4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0605f"/><stop offset="1" stop-color="#ad2740"/>
+    </linearGradient>
+    <linearGradient id="gp" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdfdfe"/><stop offset="1" stop-color="#dfe4ea"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#gp)" d="M9 4h21l9 9v31H9z"/><path fill="#b9c2cd" d="M30 4l9 9h-9z"/><path fill="none" stroke="#aeb8c4" d="M9.5 4.5h20.3l8.7 8.7v30.3H9.5z"/><circle cx="31" cy="33" r="13" fill="url(#g4)"/><circle cx="31" cy="33" r="13" fill="none" stroke="#ffffff" stroke-opacity=".35"/><path fill="#ffffff" d="M27 25.6v14.8L38.4 33z"/>
 </svg>

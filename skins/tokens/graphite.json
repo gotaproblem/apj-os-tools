@@ -1,0 +1,52 @@
+{
+  "name": "graphite",
+  "file": "GRPH",
+  "title": "Graphite",
+  "author": "APJ-OS",
+  "roles": {
+    "FACE": "#2d3236",
+    "TEXT": "#e9ebed",
+    "LIGHT": "#434a50",
+    "DARK": "#131619",
+    "SELBG": "#343b42",
+    "SELFG": "#ffffff",
+    "ALBG": "#6b3b38",
+    "ALFG": "#ffeceb",
+    "PANEL": "#202326",
+    "TITBG": "#17191c",
+    "TITFG": "#e3e7ea",
+    "PAPER": "#17191c",
+    "BORDER": "#3b4147",
+    "HOVER": "#363c42",
+    "PRESSED": "#191c1f",
+    "FOCUS": "#cfd8e0",
+    "DISABLED": "#757d84",
+    "ELEVATION": "#0b0d0e",
+    "ACCENT": "#cfd8e0"
+  },
+  "extra": {
+    "ACCENT_INK": "#1a1d20",
+    "ACCENT_DEEP": "#aab4bd",
+    "MUTED": "#99a1a8",
+    "PANEL_TOP": "#282c30",
+    "ROW": "#1d2023",
+    "HAIR": "#ffffff12"
+  },
+  "metrics": {
+    "radius_group": 6,
+    "radius_btn": 5,
+    "radius_badge": 3,
+    "radius_knob": 8,
+    "border": 1,
+    "rail": 3,
+    "seek_h": 6,
+    "knob": 12,
+    "glyph": 16,
+    "art": 96,
+    "btn_min": 24,
+    "btnacc": 38,
+    "paneltop_h": 48,
+    "badge_h": 16,
+    "row_h": 24
+  }
+}

@@ -1,0 +1,328 @@
+diff --git a/platforms/atari/audio/dmasnd.h b/platforms/atari/audio/dmasnd.h
+index e9c0433..6343d38 100755
+--- a/platforms/atari/audio/dmasnd.h
++++ b/platforms/atari/audio/dmasnd.h
+@@ -41,6 +41,9 @@ long dmasnd_mp3_pos_s(void);                  /* current position, seconds (-1 n
+ long dmasnd_mp3_len_s(void);                  /* track length, seconds (0 unknown) */
+ void dmasnd_mp3_seek_rel(long delta_s);       /* seek +/- seconds from current */
+ const char *dmasnd_mp3_meta(int which);       /* 0=title 1=artist 2=album */
++long dmasnd_mp3_info(int which);              /* 0=bitrate kbps 1=ch 2=layer 3=vbr */
++const void *dmasnd_mp3_art(long *len);        /* ID3 cover, encoded; NULL if none  */
++int  dmasnd_mp3_volume(int percent);          /* -1 queries; 0..200                */
+ 
+ /* ---- capture (dmasnd_capture.c) ---- */
+ int      dmasnd_owns(uint32_t addr);               /* addr in $FF8900..$FF8925?      */
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index 90d8ccf..07d2ac7 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -51,6 +51,16 @@ static long             mp3_rate_hz = 0;    /* track sample rate (frames/s)   */
+ static long             mp3_len_s = 0;      /* track length in seconds        */
+ static char             mp3_meta[3][128];   /* 0=title 1=artist 2=album       */
+ 
++/* Stream facts and the cover image, captured once at open so the GEM app can
++ * read them lock-free afterwards - same rule as mp3_meta. */
++static long             mp3_bitrate = 0;    /* kbps                           */
++static long             mp3_channels = 0;
++static long             mp3_layer = 0;
++static long             mp3_vbr = 0;        /* 1 = VBR or ABR                 */
++static unsigned char   *mp3_art = NULL;     /* ID3 APIC bytes, as stored      */
++static long             mp3_art_len = 0;
++static atomic_int       mp3_gain = 100;     /* percent, applied on the way out */
++
+ /* ---------------------------------------------------- lifecycle --------- */
+ 
+ static void SDLCALL dmasnd_postmix(void *ud, const SDL_AudioSpec *spec,
+@@ -330,8 +340,15 @@ static void SDLCALL mp3_feed_cb(void *ud, SDL_AudioStream *stream,
+         size_t done = 0;
+         int rc = mpg123_read(g_mh, buf, want, &done);
+         if (done > 0) {
++            int g = atomic_load(&mp3_gain);
+             if (!announced) { announced = 1;
+                 fprintf(stderr, "[NF] MP3: decoding (first %zu bytes)\n", done); }
++            if (g != 100) {
++                int16_t *sm = (int16_t *)buf;
++                size_t n = done / sizeof(int16_t), k;
++                for (k = 0; k < n; k++)
++                    sm[k] = (int16_t)((int32_t)sm[k] * g / 100);
++            }
+             SDL_PutAudioStreamData(stream, buf, (int)done);
+             need -= (int)done;
+         }
+@@ -359,6 +376,12 @@ void dmasnd_mp3_stop(void)
+         SDL_DestroyAudioStream(g_mp3);
+         g_mp3 = NULL;
+     }
++    if (mp3_art) {
++        free(mp3_art);
++        mp3_art = NULL;
++    }
++    mp3_art_len = 0;
++    mp3_bitrate = mp3_channels = mp3_layer = mp3_vbr = 0;
+     if (g_mh) {
+         mpg123_close(g_mh);
+         mpg123_delete(g_mh);
+@@ -384,6 +407,9 @@ int dmasnd_mp3_play(const char *host_path)
+         fprintf(stderr, "[NF] MP3 mpg123_new: %s\n", mpg123_plain_strerror(err));
+         return -1;
+     }
++    /* ID3v2 APIC frames are not parsed unless this flag is set, and it has
++     * to be set before the file is opened. */
++    mpg123_param(mh, MPG123_ADD_FLAGS, MPG123_PICTURE, 0.0);
+     if (mpg123_open(mh, host_path) != MPG123_OK) {
+         fprintf(stderr, "[NF] MP3 open '%s': %s\n", host_path, mpg123_strerror(mh));
+         mpg123_delete(mh);
+@@ -428,6 +454,40 @@ int dmasnd_mp3_play(const char *host_path)
+             const char *b = strrchr(host_path, '/');
+             snprintf(mp3_meta[0], sizeof(mp3_meta[0]), "%s", b ? b + 1 : host_path);
+         }
++
++        /* what the stream actually is */
++        {
++            struct mpg123_frameinfo fi;
++
++            memset(&fi, 0, sizeof(fi));
++            if (mpg123_info(mh, &fi) == MPG123_OK) {
++                mp3_bitrate  = fi.bitrate;
++                mp3_layer    = fi.layer;
++                mp3_vbr      = (fi.vbr != MPG123_CBR) ? 1 : 0;
++            } else {
++                mp3_bitrate = mp3_layer = mp3_vbr = 0;
++            }
++            mp3_channels = channels;
++        }
++
++        /* the cover, kept as the encoded bytes - the Pi decodes it only if
++         * the front-end actually asks for it */
++        if (v2 && v2->pictures > 0 && v2->picture) {
++            size_t pick = 0, i;
++
++            for (i = 0; i < v2->pictures; i++)
++                if (v2->picture[i].type == mpg123_id3_pic_front_cover) {
++                    pick = i;
++                    break;
++                }
++            if (v2->picture[pick].size > 0 && v2->picture[pick].data) {
++                mp3_art = (unsigned char *)malloc(v2->picture[pick].size);
++                if (mp3_art) {
++                    memcpy(mp3_art, v2->picture[pick].data, v2->picture[pick].size);
++                    mp3_art_len = (long)v2->picture[pick].size;
++                }
++            }
++        }
+     }
+ 
+     SDL_AudioSpec src;
+@@ -465,6 +525,41 @@ int dmasnd_mp3_is_paused(void) { return atomic_load(&mp3_paused); }
+ 
+ long dmasnd_mp3_len_s(void) { return mp3_len_s; }
+ 
++/* 0 = bitrate kbps, 1 = channels, 2 = layer, 3 = 1 if VBR/ABR. -1 if the
++ * track did not say. Sample rate is deliberately not exposed. */
++long dmasnd_mp3_info(int which)
++{
++    if (!atomic_load(&mp3_on) && !g_mh)
++        return -1;
++    switch (which) {
++        case 0: return mp3_bitrate  ? mp3_bitrate  : -1;
++        case 1: return mp3_channels ? mp3_channels : -1;
++        case 2: return mp3_layer    ? mp3_layer    : -1;
++        case 3: return mp3_vbr;
++    }
++    return -1;
++}
++
++/* The cover image exactly as ID3 stored it (JPEG or PNG). NULL if none. */
++const void *dmasnd_mp3_art(long *len)
++{
++    if (len)
++        *len = mp3_art_len;
++    return mp3_art;
++}
++
++/* -1 queries. Applied in the decode callback, so it survives a track change
++ * and costs nothing at 100. */
++int dmasnd_mp3_volume(int percent)
++{
++    if (percent >= 0) {
++        if (percent > 200)
++            percent = 200;
++        atomic_store(&mp3_gain, percent);
++    }
++    return atomic_load(&mp3_gain);
++}
++
+ long dmasnd_mp3_pos_s(void)
+ {
+     if (!g_mp3 || !g_mh || mp3_rate_hz <= 0)
+diff --git a/platforms/atari/network/atari_natfeat.cpp b/platforms/atari/network/atari_natfeat.cpp
+index 3a82f72..450c702 100755
+--- a/platforms/atari/network/atari_natfeat.cpp
++++ b/platforms/atari/network/atari_natfeat.cpp
+@@ -139,7 +139,17 @@ enum nf_mp3_ops {
+   NF_MP3_SEEK,       /* param0: signed seconds relative to current position */
+   NF_MP3_POS,        /* -> current position in seconds (-1 if n/a) */
+   NF_MP3_LEN,        /* -> track length in seconds (0 if unknown) */
+-  NF_MP3_META        /* param0: 0=title 1=artist 2=album; param1: buf; param2: len */
++  NF_MP3_META,       /* param0: 0=title 1=artist 2=album; param1: buf; param2: len */
++  NF_MP3_INFO,       /* param0: 0=bitrate kbps 1=channels 2=layer 3=VBR -> value,
++                        -1 if the track did not say. No sample rate: the
++                        front-end does not show one.                          */
++  NF_MP3_ART,        /* param0 = guest buffer, param1 = its size, param2 = edge.
++                        Decodes the ID3 cover host-side and writes an
++                        edge x edge image in the fVDI 32bpp format (00 RR GG BB),
++                        letterboxed. -> bytes written, 0 = no cover, -1 error.
++                        Put the buffer in TT-RAM: a write below 4 MB goes
++                        through the JIT's self-modifying-code check.          */
++  NF_MP3_VOLUME      /* param0: -1 queries, else 0..200 percent -> the volume  */
+ };
+ 
+ /* VIDPLAY subids. 0..7 are deliberately identical to MP3PLAY so a front-end
+@@ -277,6 +287,9 @@ extern "C" long dmasnd_mp3_pos_s(void);
+ extern "C" long dmasnd_mp3_len_s(void);
+ extern "C" void dmasnd_mp3_seek_rel(long delta_s);
+ extern "C" const char *dmasnd_mp3_meta(int which);
++extern "C" long dmasnd_mp3_info(int which);
++extern "C" const void *dmasnd_mp3_art(long *len);
++extern "C" int  dmasnd_mp3_volume(int percent);
+ 
+ /* Host video player - platforms/atari/video/vidplay.c */
+ extern "C" int  vidplay_play(const char *host_path);
+@@ -4841,6 +4854,37 @@ static uae_u32 nf_call_mp3(uae_u32 subid, uaecptr params)
+       nf_write_string(buf, len, dmasnd_mp3_meta((int)which));
+       return 0;
+     }
++    case NF_MP3_INFO:
++      return (uae_u32)dmasnd_mp3_info((int)nf_get_param(params, 0));
++    case NF_MP3_VOLUME:
++      return (uae_u32)dmasnd_mp3_volume((int)(int32_t)nf_get_param(params, 0));
++    case NF_MP3_ART: {
++      uaecptr dstp = nf_get_param(params, 0);
++      uae_u32 cap  = nf_get_param(params, 1);
++      int     edge = (int)nf_get_param(params, 2);
++      long    alen = 0;
++      const void *art = dmasnd_mp3_art(&alen);
++      uint8_t *pix = NULL;
++      size_t   plen = 0;
++      uae_u8  *host = NULL;
++
++      if (!art || alen <= 0)
++        return 0;                       /* no cover - draw the placeholder */
++      if (!dstp || edge <= 0 || edge > 512)
++        return (uae_u32)-1;
++      if ((uae_u32)(edge * edge * 4) > cap)
++        return (uae_u32)-1;
++      if (!nf_host_ram_ptr(dstp, (uint32_t)(edge * edge * 4), &host))
++        return (uae_u32)-1;
++      if (psimg_load_scaled_mem((const uint8_t *)art, (size_t)alen,
++                                edge, edge, 32, PSIMG_MODE_FIT,
++                                &pix, &plen) != 0)
++        return (uae_u32)-1;
++      memcpy(host, pix, plen);
++      psimg_free(pix);
++      HOSTFS_LOG("[NF] MP3.ART %dx%d -> %zu bytes\n", edge, edge, plen);
++      return (uae_u32)plen;
++    }
+   }
+   return (uae_u32)-1;
+ }
+diff --git a/platforms/atari/psimg/psimg.cpp b/platforms/atari/psimg/psimg.cpp
+index 4a767df..c2ff510 100644
+--- a/platforms/atari/psimg/psimg.cpp
++++ b/platforms/atari/psimg/psimg.cpp
+@@ -28,27 +28,17 @@ int psimg_probe(const char *host_path, int *w, int *h)
+   return 0;
+ }
+ 
+-int psimg_load_scaled(const char *host_path, int dw, int dh, int bpp,
+-                      int mode, uint8_t **out, size_t *out_len)
++/* Everything after the decode is the same whether the pixels came from a
++ * file or from memory: scale into a dw x dh box, then convert to the guest
++ * pixel format. Takes ownership of src (frees it). */
++static int psimg_finish(unsigned char *src, int sw, int sh, int dw, int dh,
++                        int bpp, int mode, uint8_t **out, size_t *out_len)
+ {
+-  int sw, sh, comp;
+-  unsigned char *src;
+   unsigned char *rgb;
+   uint8_t *dst;
+   size_t npix, len, i;
+   int bw, bh, ox, oy;
+ 
+-  if (dw <= 0 || dh <= 0 || dw > 8192 || dh > 8192)
+-    return -1;
+-  if (bpp != 16 && bpp != 32)
+-    return -1;
+-
+-  src = stbi_load(host_path, &sw, &sh, &comp, 3);
+-  if (!src) {
+-    printf("[PSIMG] cannot decode %s: %s\n", host_path, stbi_failure_reason());
+-    return -1;
+-  }
+-
+   /* target box inside dw x dh */
+ 
+   if (mode == PSIMG_MODE_FIT) {
+@@ -126,6 +116,46 @@ int psimg_load_scaled(const char *host_path, int dw, int dh, int bpp,
+   return 0;
+ }
+ 
++int psimg_load_scaled(const char *host_path, int dw, int dh, int bpp,
++                      int mode, uint8_t **out, size_t *out_len)
++{
++  int sw, sh, comp;
++  unsigned char *src;
++
++  if (dw <= 0 || dh <= 0 || dw > 8192 || dh > 8192)
++    return -1;
++  if (bpp != 16 && bpp != 32)
++    return -1;
++
++  src = stbi_load(host_path, &sw, &sh, &comp, 3);
++  if (!src) {
++    printf("[PSIMG] cannot decode %s: %s\n", host_path, stbi_failure_reason());
++    return -1;
++  }
++  return psimg_finish(src, sw, sh, dw, dh, bpp, mode, out, out_len);
++}
++
++int psimg_load_scaled_mem(const uint8_t *data, size_t len, int dw, int dh,
++                          int bpp, int mode, uint8_t **out, size_t *out_len)
++{
++  int sw, sh, comp;
++  unsigned char *src;
++
++  if (!data || len == 0)
++    return -1;
++  if (dw <= 0 || dh <= 0 || dw > 8192 || dh > 8192)
++    return -1;
++  if (bpp != 16 && bpp != 32)
++    return -1;
++
++  src = stbi_load_from_memory(data, (int)len, &sw, &sh, &comp, 3);
++  if (!src) {
++    printf("[PSIMG] cannot decode embedded image: %s\n", stbi_failure_reason());
++    return -1;
++  }
++  return psimg_finish(src, sw, sh, dw, dh, bpp, mode, out, out_len);
++}
++
+ void psimg_free(uint8_t *buf)
+ {
+   free(buf);
+diff --git a/platforms/atari/psimg/psimg.h b/platforms/atari/psimg/psimg.h
+index 993db28..e5b5641 100644
+--- a/platforms/atari/psimg/psimg.h
++++ b/platforms/atari/psimg/psimg.h
+@@ -41,6 +41,11 @@ enum psimg_mode {
+ int psimg_load_scaled(const char *host_path, int dw, int dh, int bpp,
+                       int mode, uint8_t **out, size_t *out_len);
+ 
++/* Same, but from an image already in memory - an ID3 APIC frame, say.
++ * The bytes are only read during the call. */
++int psimg_load_scaled_mem(const uint8_t *data, size_t len, int dw, int dh,
++                          int bpp, int mode, uint8_t **out, size_t *out_len);
++
+ void psimg_free(uint8_t *buf);
+ 
+ /* Probe image dimensions without decoding. Returns 0 on success. */

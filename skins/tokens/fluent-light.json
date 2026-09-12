@@ -1,0 +1,52 @@
+{
+  "name": "fluent-light",
+  "file": "FLTL",
+  "title": "Fluent Light",
+  "author": "APJ-OS",
+  "roles": {
+    "FACE": "#ffffff",
+    "TEXT": "#151b22",
+    "LIGHT": "#ffffff",
+    "DARK": "#c3cad3",
+    "SELBG": "#cfe4f7",
+    "SELFG": "#0a2a45",
+    "ALBG": "#f7d9d6",
+    "ALFG": "#6d211b",
+    "PANEL": "#f2f4f7",
+    "TITBG": "#e8ecf1",
+    "TITFG": "#19212a",
+    "PAPER": "#ffffff",
+    "BORDER": "#d7dde5",
+    "HOVER": "#eaeff5",
+    "PRESSED": "#dbe4ee",
+    "FOCUS": "#0f6cbd",
+    "DISABLED": "#9aa5b1",
+    "ELEVATION": "#b6bfca",
+    "ACCENT": "#0f6cbd"
+  },
+  "extra": {
+    "ACCENT_INK": "#ffffff",
+    "ACCENT_DEEP": "#0a5599",
+    "MUTED": "#5b6875",
+    "PANEL_TOP": "#fafbfd",
+    "ROW": "#f4f6fa",
+    "HAIR": "#0f172014"
+  },
+  "metrics": {
+    "radius_group": 6,
+    "radius_btn": 5,
+    "radius_badge": 3,
+    "radius_knob": 8,
+    "border": 1,
+    "rail": 3,
+    "seek_h": 6,
+    "knob": 12,
+    "glyph": 16,
+    "art": 96,
+    "btn_min": 24,
+    "btnacc": 38,
+    "paneltop_h": 48,
+    "badge_h": 16,
+    "row_h": 24
+  }
+}

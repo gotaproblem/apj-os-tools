@@ -174,5 +174,29 @@
  {
   "name": "PDF FILE",
   "hash": "7393ad34"
+ },
+ {
+  "name": "AUDIO FILE",
+  "hash": "47c9b2bf"
+ },
+ {
+  "name": "VIDEO FILE",
+  "hash": "d98ae9ad"
+ },
+ {
+  "name": "MP3 PLAYER",
+  "hash": "4ce00b24"
+ },
+ {
+  "name": "MP4 PLAYER",
+  "hash": "37526fe0"
+ },
+ {
+  "name": "SOURCE FILE",
+  "hash": "d9b75d4d"
+ },
+ {
+  "name": "PDF FILE",
+  "hash": "7393ad34"
  }
 ]

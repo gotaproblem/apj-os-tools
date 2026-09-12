@@ -1,1 +1,6 @@
 .DS_Store
+
+# APJSKIN working files (deletion is blocked from the cloud session)
+mp3gem/mp3gem.c.pre-skin
+icons/out/newicons.png
+skins/_to_delete/

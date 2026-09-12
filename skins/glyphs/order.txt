@@ -1,0 +1,27 @@
+# APJSKIN glyph order. THIS FILE is the authority for glyph ids, not the
+# numeric prefix on the filenames (which is historical). The first 19 names
+# also get a pre-composited button tile in the sheet, in this same order.
+PLAY
+PAUSE
+STOP
+PREV
+NEXT
+RW
+FF
+SHUFFLE
+REPEAT
+REPEAT1
+VOL
+VOLLOW
+MUTE
+OPEN
+LIST
+FULL
+UNFULL
+EJECT
+INFO
+AUDIO
+VIDEO
+MIN
+MAX
+CLOSE
