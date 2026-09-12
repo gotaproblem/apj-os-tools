@@ -49,7 +49,7 @@ extern long nf_call(long id, ...);
 #define NF_MP3_INFO   8      /* 0 bitrate kbps, 1 channels, 2 layer, 3 VBR   */
 #define NF_MP3_ART    9      /* ptr, size, edge -> bytes written, 0 = no art */
 #define NF_MP3_VOLUME 10     /* -1 query, 0..100 set                          */
-#define NF_MP3_FILELEN 11    /* p0 path -> length in seconds, -1 unknown      */
+#define NF_MP3_FILELEN 11    /* p0 path -> seconds; -2 not yet (ask again), -1 no */
 
 /* ---------------------------------------------------------------- state -- */
 
@@ -118,37 +118,35 @@ static void scan_reset(void)
 }
 
 /*
- * One file per timer tick. Even one can cost a full mpg123_scan() on a VBR
- * file without a Xing header, and that runs inside the event loop - two of
- * them per 250 ms tick made the pointer stutter. Sub-op 11 avoids the scan
- * whenever the header already knows the length. Returns 1 if the list
- * should be redrawn.
+ * One question per timer tick, and the host is not allowed to make us
+ * wait for the answer. A NatFeat runs inline on the 68k, and a handler
+ * that took a second to mpg123_scan() a file stalled the whole guest for
+ * that second - long enough to wedge the timer interrupts, which is what
+ * stopped the clock. Sub-op 11 now answers -2 while a host thread does
+ * the reading; we just ask about the same file again next tick.
+ * Returns 1 if a visible row got its duration and the list should redraw.
  */
 static int scan_step(void)
 {
     char path[400];
-    int done = 0, redraw_wanted = 0;
+    const char *nm;
+    long v;
 
-    if (!have_filelen)
+    if (!have_filelen || scanned >= ntracks)
         return 0;
-    while (scanned < ntracks && done < 1) {   /* one per tick: see below */
-        const char *nm = list[scanned];
-        long v;
-
-        snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
-        v = nf_call(mp3id | NF_MP3_FILELEN, path);
-        if (v < 0) {                  /* an older emulator: stop asking */
-            have_filelen = 0;
-            scanned = ntracks;
-            break;
-        }
-        tlen[scanned] = v;
-        if (scanned >= ui.top && scanned < ui.top + ui.visrows)
-            redraw_wanted = 1;
-        scanned++;
-        done++;
+    nm = list[scanned];
+    snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
+    v = nf_call(mp3id | NF_MP3_FILELEN, path);
+    if (v == -2)                      /* still reading: same file next tick */
+        return 0;
+    if (v < 0) {                      /* an older emulator: stop asking */
+        have_filelen = 0;
+        scanned = ntracks;
+        return 0;
     }
-    return redraw_wanted;
+    tlen[scanned] = v;
+    scanned++;
+    return (scanned - 1 >= ui.top && scanned - 1 < ui.top + ui.visrows);
 }
 
 /*

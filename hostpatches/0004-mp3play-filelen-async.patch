@@ -1,0 +1,206 @@
+From f20c1e21036557a7e4e9dd121b59fbb401e4fec5 Mon Sep 17 00:00:00 2001
+From: "Claude Fable 5.1" <noreply@anthropic.com>
+Date: Sat, 12 Sep 2026 07:15:39 +0000
+Subject: [PATCH] MP3PLAY: FILELEN never stalls the guest
+
+A NatFeat handler runs inline on the emulated CPU, and for as long as it
+takes the 68k is stalled. mpg123_scan() on a five-minute VBR file is a
+second or more, and stalls that long inside a trap took the guest's timer
+interrupts down: MP3GEM's clock stopped dead and only IKBD traffic from
+moving the mouse nudged it forward. Twenty-two of them in a row at load
+was worse.
+
+So the NatFeat no longer reads anything. It returns -2 (pending) at once
+and queues the path; a detached worker thread does the open/length/scan
+with no lock held, and the answer is there the next time the guest asks.
+A 64-slot cache means a folder is read once. Queued slots are never
+evicted - the worker owns them - and if every slot is queued the caller
+simply gets -2 again.
+
+Whether a long inline stall SHOULD wedge the timer is a separate question
+for the emulator; VIDPLAY.PLAY and STBOX.START stall too, once each, and
+seem to get away with it. This patch just stops MP3PLAY doing it at all.
+
+Applies on top of "MP3PLAY: FILELEN reads the header before it scans".
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MGcLwq6U6E1QhD3W3PzuF7
+---
+ platforms/atari/audio/dmasnd.h            |   2 +-
+ platforms/atari/audio/dmasnd_hdmi.c       | 121 ++++++++++++++++++++--
+ platforms/atari/network/atari_natfeat.cpp |   6 +-
+ 3 files changed, 120 insertions(+), 9 deletions(-)
+
+diff --git a/platforms/atari/audio/dmasnd.h b/platforms/atari/audio/dmasnd.h
+index ec31c05..4f1b795 100755
+--- a/platforms/atari/audio/dmasnd.h
++++ b/platforms/atari/audio/dmasnd.h
+@@ -44,7 +44,7 @@ const char *dmasnd_mp3_meta(int which);       /* 0=title 1=artist 2=album */
+ long dmasnd_mp3_info(int which);              /* 0=bitrate kbps 1=ch 2=layer 3=vbr */
+ const void *dmasnd_mp3_art(long *len);        /* ID3 cover, encoded; NULL if none  */
+ int  dmasnd_mp3_volume(int percent);          /* -1 queries; 0..200                */
+-long dmasnd_mp3_filelen(const char *host_path); /* seconds, -1 unreadable          */
++long dmasnd_mp3_filelen(const char *host_path); /* seconds, -2 not yet, -1 unreadable; never blocks */
+ 
+ /* ---- capture (dmasnd_capture.c) ---- */
+ int      dmasnd_owns(uint32_t addr);               /* addr in $FF8900..$FF8925?      */
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index ee5846e..e000539 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -549,13 +549,11 @@ const void *dmasnd_mp3_art(long *len)
+ }
+ 
+ /*
+- * How long a file is, without disturbing the track that is playing. The
+- * front-end wants a duration column in its playlist and MP3PLAY only ever
+- * knew about the open track; libmpg123 handles are independent, so this
+- * opens its own. A CBR file costs a header read, a VBR one a full scan,
+- * which is why the guest calls this once per file on load and caches it.
++ * How long a file is, without disturbing the track that is playing.
++ * libmpg123 handles are independent, so this opens its own. Synchronous;
++ * only ever called from the worker below - see dmasnd_mp3_filelen().
+  */
+-long dmasnd_mp3_filelen(const char *host_path)
++static long filelen_sync(const char *host_path)
+ {
+     static int ready = 0;
+     mpg123_handle *mh;
+@@ -591,6 +589,117 @@ long dmasnd_mp3_filelen(const char *host_path)
+     return secs;
+ }
+ 
++/*
++ * The asynchronous face of filelen_sync(), which is what the NatFeat uses.
++ *
++ * A NatFeat handler runs inline on the emulated CPU: for as long as it
++ * takes, the 68k is stalled. mpg123_scan() on a five-minute VBR file is a
++ * second or more, and a stall that long inside a trap took the guest's
++ * timer interrupts down with it - MP3GEM's clock stopped, and only IKBD
++ * traffic from moving the mouse nudged it along. So nothing here may
++ * block. The guest asks, gets -2 (pending) straight away, and asks again
++ * next tick; a worker thread does the reading and the answer is waiting
++ * the next time round. A small cache means a folder is only read once.
++ */
++#include <pthread.h>
++
++#define FL_SLOTS 64
++#define FL_PATH  528                        /* HOSTFS_HOST_PATH_MAX + 16 */
++
++static struct {
++    char path[FL_PATH];
++    long secs;
++    int  state;                         /* 0 free, 1 queued, 2 done */
++    unsigned long age;
++} fl[FL_SLOTS];
++static pthread_mutex_t fl_mx = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t  fl_cv = PTHREAD_COND_INITIALIZER;
++static pthread_t       fl_thr;
++static int             fl_started = 0;
++static unsigned long   fl_clock = 0;
++
++static void *fl_worker(void *arg)
++{
++    (void)arg;
++    for (;;) {
++        char path[FL_PATH];
++        int i, pick = -1;
++        long secs;
++
++        pthread_mutex_lock(&fl_mx);
++        for (;;) {
++            for (i = 0; i < FL_SLOTS; i++)
++                if (fl[i].state == 1) { pick = i; break; }
++            if (pick >= 0)
++                break;
++            pthread_cond_wait(&fl_cv, &fl_mx);
++        }
++        strcpy(path, fl[pick].path);
++        pthread_mutex_unlock(&fl_mx);
++
++        secs = filelen_sync(path);          /* the slow part, no lock held */
++
++        pthread_mutex_lock(&fl_mx);
++        if (fl[pick].state == 1 && strcmp(fl[pick].path, path) == 0) {
++            fl[pick].secs = secs;
++            fl[pick].state = 2;
++        }
++        pthread_mutex_unlock(&fl_mx);
++    }
++    return NULL;
++}
++
++long dmasnd_mp3_filelen(const char *host_path)
++{
++    int i, slot = -1;
++    long ret = -2;
++    unsigned long oldest = ~0UL;
++
++    if (!host_path || !*host_path)
++        return -1;
++    if (strlen(host_path) >= sizeof(fl[0].path))
++        return -1;
++
++    pthread_mutex_lock(&fl_mx);
++    if (!fl_started) {
++        if (pthread_create(&fl_thr, NULL, fl_worker, NULL) == 0) {
++            pthread_detach(fl_thr);
++            fl_started = 1;
++        } else {
++            pthread_mutex_unlock(&fl_mx);
++            return -1;
++        }
++    }
++    fl_clock++;
++    for (i = 0; i < FL_SLOTS; i++) {
++        if (fl[i].state && strcmp(fl[i].path, host_path) == 0) {
++            fl[i].age = fl_clock;
++            ret = (fl[i].state == 2) ? fl[i].secs : -2;
++            pthread_mutex_unlock(&fl_mx);
++            return ret;
++        }
++        /* remember the best slot to evict: free first, then the oldest
++         * finished one; never a queued one, the worker owns those */
++        if (fl[i].state == 0) {
++            if (slot < 0 || fl[slot].state != 0) { slot = i; oldest = 0; }
++        } else if (fl[i].state == 2 && (slot < 0 || fl[slot].state != 0) &&
++                   fl[i].age < oldest) {
++            slot = i; oldest = fl[i].age;
++        }
++    }
++    if (slot < 0) {                     /* everything queued: try later */
++        pthread_mutex_unlock(&fl_mx);
++        return -2;
++    }
++    strcpy(fl[slot].path, host_path);
++    fl[slot].secs = 0;
++    fl[slot].state = 1;
++    fl[slot].age = fl_clock;
++    pthread_cond_signal(&fl_cv);
++    pthread_mutex_unlock(&fl_mx);
++    return -2;
++}
++
+ /* -1 queries. Applied in the decode callback, so it survives a track change
+  * and costs nothing at 100. */
+ int dmasnd_mp3_volume(int percent)
+diff --git a/platforms/atari/network/atari_natfeat.cpp b/platforms/atari/network/atari_natfeat.cpp
+index 072943c..31595f5 100755
+--- a/platforms/atari/network/atari_natfeat.cpp
++++ b/platforms/atari/network/atari_natfeat.cpp
+@@ -151,8 +151,10 @@ enum nf_mp3_ops {
+                         through the JIT's self-modifying-code check.          */
+   NF_MP3_VOLUME,     /* param0: -1 queries, else 0..200 percent -> the volume  */
+   NF_MP3_FILELEN     /* param0 = GEMDOS path -> that file's length in seconds,
+-                        0 if it could not be determined, -1 on error. Does not
+-                        touch the track that is playing.                      */
++                        -2 = not known yet, ask again next tick; 0 = could not
++                        be determined; -1 = error. NEVER stalls the guest: the
++                        reading happens on a host thread. Does not touch the
++                        track that is playing.                                */
+ };
+ 
+ /* VIDPLAY subids. 0..7 are deliberately identical to MP3PLAY so a front-end
+-- 
+2.43.0
+
