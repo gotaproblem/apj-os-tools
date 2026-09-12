@@ -23,6 +23,13 @@
 
 #define M(pt)		apj_skin_m(pt)
 
+/*
+ * Temporary. Puts the timer tick count and the raw MP3PLAY answers on the
+ * status line, so a screenshot says whether the event loop is running and
+ * what the host is actually returning. Delete once the clock is trusted.
+ */
+#define MP3UI_DEBUG	1
+
 static void draw_plain(MP3UI *u, short vh);
 
 static void hhmmss(char *out, long s)
@@ -440,8 +447,26 @@ static void draw_list(MP3UI *u, short vh)
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(APJ_X_MUTED), tbuf);
 		}
-		apj_skin_text(vh, (short) (l->x + M(34)), (short) (iy + (u->rowh - ch) / 2),
-		         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), nm);
+		{
+			char clip[96];
+			short avail = (short) (l->w - M(34) - M(58));
+			short max = (short) (cw > 0 ? avail / cw : 0);
+
+			if (max > (short) sizeof(clip) - 1)
+				max = (short) sizeof(clip) - 1;
+			if (max < 4)
+				max = 4;
+			if ((short) strlen(nm) > max)
+			{
+				memcpy(clip, nm, (size_t) max - 3);
+				strcpy(clip + max - 3, "...");
+			}
+			else
+				strcpy(clip, nm);
+			apj_skin_text(vh, (short) (l->x + M(34)),
+			         (short) (iy + (u->rowh - ch) / 2),
+			         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), clip);
+		}
 		if (u->len_of)
 		{
 			long secs = u->len_of(u->ctx, i);
@@ -467,11 +492,16 @@ static void draw_status(MP3UI *u, short vh)
 	ui_font(vh, F_SMALL);
 	y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
 
+#if MP3UI_DEBUG
+	sprintf(buf, "%d tracks   t%ld p%ld s%ld", (int) u->ntracks,
+	        u->dbg_ticks, u->dbg_pos, u->dbg_status);
+#else
 	sprintf(buf, "%d tracks", (int) u->ntracks);
+#endif
 	apj_skin_text(vh, (short) (u->work.g_x + M(PAD)), y,
 	         apj_skin_pen(APJ_X_MUTED), buf);
 	if (u->dir)
-		apj_skin_text(vh, (short) (u->work.g_x + M(PAD) + cellw(vh) * 14), y,
+		apj_skin_text(vh, (short) (u->work.g_x + M(PAD) + cellw(vh) * 26), y,
 		         apj_skin_pen(APJ_X_MUTED), u->dir);
 }
 

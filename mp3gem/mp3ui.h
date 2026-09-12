@@ -47,6 +47,9 @@ typedef struct
 	void  *ctx;
 	const char *dir;
 
+	/* temporary: set MP3UI_DEBUG to show these on the status line */
+	long   dbg_ticks, dbg_pos, dbg_status;
+
 	/* interaction */
 	short  hover;			/* widget id under the pointer, or -1  */
 	short  press;			/* widget id held down, or -1          */

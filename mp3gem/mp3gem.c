@@ -65,7 +65,8 @@ static int   iconified = 0;
 
 static char  dir[256]  = "";              /* playlist directory (GEMDOS path) */
 static char  list[MAXTRACKS][NAMELEN];
-static long  tlen[MAXTRACKS];             /* seconds, 0 = not known */
+static long  tlen[MAXTRACKS];             /* seconds, 0 = not known yet */
+static int   scanned = 0;                 /* how many of those are filled in */
 static int   ntracks = 0;
 static int   have_filelen = 1;            /* cleared if the host has no sub-op 11 */
 
@@ -107,30 +108,45 @@ static long len_of(void *c, short i)
  * which is why this happens on load behind a busy bee rather than during
  * a redraw.
  */
-static void scan_lengths(void)
+static void scan_reset(void)
 {
-    char path[400];
     int i;
 
     for (i = 0; i < MAXTRACKS; i++)
         tlen[i] = 0;
-    if (!have_filelen || !ntracks)
-        return;
+    scanned = 0;
+}
 
-    graf_mouse(BUSYBEE, NULL);
-    for (i = 0; i < ntracks; i++) {
-        const char *nm = list[i];
+/*
+ * A few files per timer tick, not all of them at once. mpg123_scan() on a
+ * VBR file is not free and 22 of them in a row is a visible stall before
+ * the window even appears. Returns 1 if the list should be redrawn.
+ */
+static int scan_step(void)
+{
+    char path[400];
+    int done = 0, redraw_wanted = 0;
+
+    if (!have_filelen)
+        return 0;
+    while (scanned < ntracks && done < 2) {
+        const char *nm = list[scanned];
         long v;
 
         snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
         v = nf_call(mp3id | NF_MP3_FILELEN, path);
         if (v < 0) {                  /* an older emulator: stop asking */
             have_filelen = 0;
+            scanned = ntracks;
             break;
         }
-        tlen[i] = v;
+        tlen[scanned] = v;
+        if (scanned >= ui.top && scanned < ui.top + ui.visrows)
+            redraw_wanted = 1;
+        scanned++;
+        done++;
     }
-    graf_mouse(ARROW, NULL);
+    return redraw_wanted;
 }
 
 /*
@@ -328,7 +344,7 @@ static int load_dir(const char *d)
     ui.ntracks = (short)ntracks;
     ui.top = 0;
     ui.sel = ntracks ? 0 : -1;
-    scan_lengths();
+    scan_reset();
     return ntracks;
 }
 
@@ -651,11 +667,16 @@ int main(int argc, char *argv[])
             else if (c == 'q' || c == 'Q' || c == 0x1b) goto out;
         }
         if (ev & MU_TIMER) {
+            int relist = scan_step();
+
+            ui.dbg_ticks++;
             if (ui.playing && !ui.paused) {
                 long p = nf_call(mp3id | NF_MP3_POS);
+                ui.dbg_pos = p;
                 if (p >= 0)
                     ui.pos_s = p;
-                if (nf_call(mp3id | NF_MP3_STATUS) == 0) {
+                ui.dbg_status = nf_call(mp3id | NF_MP3_STATUS);
+                if (ui.dbg_status == 0) {
                     if (ui.repeat)
                         start_track(ui.sel);
                     else
@@ -663,9 +684,9 @@ int main(int argc, char *argv[])
                     redraw(draw_all, wx, wy, ww, wh);
                     continue;
                 }
-                if (!iconified)
-                    redraw(draw_band, wx, wy, ww, wh);
             }
+            if (!iconified)
+                redraw(relist ? draw_all : draw_band, wx, wy, ww, wh);
         }
     }
 
