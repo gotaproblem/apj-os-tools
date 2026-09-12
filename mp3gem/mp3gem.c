@@ -539,6 +539,44 @@ static void click(short mx, short my)
     short id = mp3ui_hit(&ui, mx, my);
     short row;
 
+    /*
+     * The scrollbar is not a button. It was falling into the button branch
+     * below - press feedback, do_widget() doing nothing, two redraws of the
+     * whole band - and the scroll code after it was never reached.
+     */
+    if (id == W_SCROLL) {
+        if (!mp3ui_scroll_needed(&ui))
+            return;
+        {
+            short part = mp3ui_scroll_part(&ui, my);
+
+            if (part < 0)
+                set_top(ui.top - ui.visrows);
+            else if (part > 0)
+                set_top(ui.top + ui.visrows);
+            else {
+                /* drag the thumb: follow the mouse until the button goes up */
+                GRECT t;
+                short grab, bmx, bmy, bst, bks;
+
+                mp3ui_thumb_rect(&ui, &t);
+                grab = (short)(my - t.g_y);
+                ui.dragging = 1;
+                redraw_list();
+                for (;;) {
+                    graf_mkstate(&bmx, &bmy, &bst, &bks);
+                    if (!(bst & 1))
+                        break;
+                    set_top(mp3ui_scroll_top_for(&ui, bmy, grab));
+                    evnt_timer(20L);
+                }
+                ui.dragging = 0;
+                redraw_list();
+            }
+        }
+        return;
+    }
+
     if (id >= 0 && id != W_LIST && id != W_ART) {
         ui.press = id;
         redraw(draw_band, wx, wy, ww, wh);
@@ -547,34 +585,6 @@ static void click(short mx, short my)
         do_widget(id, mx);
         if (!iconified)
             redraw(draw_band, wx, wy, ww, wh);
-        return;
-    }
-    if (id == W_SCROLL && mp3ui_scroll_needed(&ui)) {
-        short part = mp3ui_scroll_part(&ui, my);
-
-        if (part < 0)
-            set_top(ui.top - ui.visrows);
-        else if (part > 0)
-            set_top(ui.top + ui.visrows);
-        else {
-            /* drag the thumb: follow the mouse until the button goes up */
-            GRECT t;
-            short grab, bmx, bmy, bst, bks;
-
-            mp3ui_thumb_rect(&ui, &t);
-            grab = (short)(my - t.g_y);
-            ui.dragging = 1;
-            redraw_list();
-            for (;;) {
-                graf_mkstate(&bmx, &bmy, &bst, &bks);
-                if (!(bst & 1))
-                    break;
-                set_top(mp3ui_scroll_top_for(&ui, bmy, grab));
-                evnt_timer(20L);
-            }
-            ui.dragging = 0;
-            redraw_list();
-        }
         return;
     }
     row = mp3ui_row_at(&ui, my);
