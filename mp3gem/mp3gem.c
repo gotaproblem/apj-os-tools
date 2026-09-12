@@ -331,6 +331,99 @@ static void relayout(void)
     set_top(ui.top);                  /* clamps after a resize */
 }
 
+#define WIN_KIND    (NAME | CLOSER | MOVER | SMALLER)
+
+/*
+ * Scale. The skin comes in 100, 125 and 175 percent sheets; by default the
+ * screen width picks one (1920 wide gets 175), which is a lot of player on
+ * a 1080-line desktop. Keys 1, 2 and 3 pick a sheet, 0 goes back to the
+ * screen's choice, and the choice is kept in MP3GEM.INF next to the .PRG:
+ *
+ *     scale=125
+ *
+ * A number other than 100, 125 or 175 (or no file) means "by screen".
+ */
+static void inf_path(char *out, long n)
+{
+    char pd[192];
+
+    apj_skin_progdir(pd, (long)sizeof pd);
+    sprintf(out, "%.*sMP3GEM.INF", (int)(n - 12), pd);
+}
+
+static short inf_scale(void)
+{
+    char path[224], buf[128], *p;
+    long fh, got;
+
+    inf_path(path, (long)sizeof path);
+    fh = Fopen(path, 0);
+    if (fh < 0)
+        return 0;
+    got = Fread((short)fh, (long)sizeof buf - 1, buf);
+    Fclose((short)fh);
+    if (got <= 0)
+        return 0;
+    buf[got] = 0;
+    p = strstr(buf, "scale=");
+    return p ? (short)atoi(p + 6) : 0;
+}
+
+static void inf_save(short scale)
+{
+    char path[224], buf[32];
+    long fh;
+
+    inf_path(path, (long)sizeof path);
+    fh = Fcreate(path, 0);
+    if (fh < 0)
+        return;
+    sprintf(buf, "scale=%d\r\n", (int)scale);
+    Fwrite((short)fh, (long)strlen(buf), buf);
+    Fclose((short)fh);
+}
+
+/* the window size this scale wants: the skin's 480x320 pt, never under the
+ * layout's minimum, never over the desktop */
+static void natural_size(short *w, short *h)
+{
+    short dx, dy, dw, dh, mw, mh;
+
+    *w = apj_skin_ok() ? apj_skin_m(480) : (short)(48 * cw);
+    *h = apj_skin_ok() ? apj_skin_m(320) : (short)(16 * ch);
+    mp3ui_minsize(&mw, &mh);
+    if (*w < mw) *w = mw;
+    if (*h < mh) *h = mh;
+    wind_get(0, WF_WORKXYWH, &dx, &dy, &dw, &dh);
+    if (*w > dw) *w = dw;
+    if (*h > dh) *h = dh;
+}
+
+static void arm_m1(void);
+
+static void set_scale(short scale)
+{
+    short x, y, w, h, cx, cy, cw2, ch2, nw, nh;
+
+    if (scale == apj_skin_preferred() && apj_skin_ok())
+        return;
+    apj_skin_prefer(scale);
+    apj_skin_reload(vh);
+    inf_save(scale);
+    if (ui.playing)
+        want_art();                   /* the cover tile is a different size now */
+
+    /* keep the top-left corner, take the new natural size */
+    wind_get(win, WF_CURRXYWH, &x, &y, &w, &h);
+    natural_size(&nw, &nh);
+    wind_calc(WC_BORDER, WIN_KIND, wx, wy, nw, nh, &cx, &cy, &cw2, &ch2);
+    wind_set(win, WF_CURRXYWH, x, y, cw2, ch2);
+    relayout();
+    arm_m1();
+    if (!iconified)
+        redraw(draw_all, wx, wy, ww, wh);
+}
+
 /*
  * Hover. MU_M1 gives one rectangle: while the pointer is over a widget we
  * ask to hear about it LEAVING that widget, and while it is not we ask to
@@ -622,7 +715,6 @@ static void click(short mx, short my)
  * a sizeable window for it, which put the player off-centre. This is a
  * fixed-layout player; the window is the size the skin says it is.
  */
-#define WIN_KIND    (NAME | CLOSER | MOVER | SMALLER)
 
 #define VA_START    0x4711     /* AV protocol: open these files */
 #define AV_STARTED  0x4738
@@ -651,6 +743,7 @@ int main(int argc, char *argv[])
     v_opnvwk(work_in, &vh, work_out);
     vst_alignment(vh, 0, 5, &d, &d);              /* left / top text origin */
     apj_init(vh);                                 /* theme + renderer, before any window */
+    apj_skin_prefer(inf_scale());                 /* MP3GEM.INF, else by screen */
     apj_skin_load(vh, NULL);                      /* follows the theme; may fail */
 
     memset(&ui, 0, sizeof(ui));
@@ -667,16 +760,10 @@ int main(int argc, char *argv[])
 
     {
         short dx, dy, dw, dh, cx, cy, cwid, chgt;
-        short want_w = apj_skin_ok() ? apj_skin_m(480) : (short)(48 * cw);
-        short want_h = apj_skin_ok() ? apj_skin_m(320) : (short)(16 * ch);
-        short mw, mh;
+        short want_w, want_h;
 
-        mp3ui_minsize(&mw, &mh);
-        if (want_w < mw) want_w = mw;
-        if (want_h < mh) want_h = mh;
+        natural_size(&want_w, &want_h);
         wind_get(0, WF_WORKXYWH, &dx, &dy, &dw, &dh);
-        if (want_w > dw) want_w = dw;
-        if (want_h > dh) want_h = dh;
         wind_calc(WC_BORDER, WIN_KIND,
                   dx + 16, dy + 16, want_w, want_h, &cx, &cy, &cwid, &chgt);
         win = wind_create(WIN_KIND, cx, cy, cwid, chgt);
@@ -796,6 +883,10 @@ int main(int argc, char *argv[])
             else if (c == 'n' || c == 'N') do_widget(W_NEXT, 0);
             else if (c == 'p' || c == 'P') do_widget(W_PREV, 0);
             else if (c == 'q' || c == 'Q' || c == 0x1b) goto out;
+            else if (c == '1') set_scale(100);   /* the sheet to use ... */
+            else if (c == '2') set_scale(125);
+            else if (c == '3') set_scale(175);
+            else if (c == '0') set_scale(0);     /* ... or the screen's choice */
         }
         if (ev & MU_TIMER) {
             int relist = scan_step();

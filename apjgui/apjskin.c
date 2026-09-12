@@ -506,10 +506,26 @@ static short screen_width(short vh)
 	return (short) (wo[0] + 1);
 }
 
+/* 0 = from the screen width; 100/125/175 = what the app (or its user)
+ * asked for. Set before apj_skin_load()/apj_skin_reload(). */
+static short sk_prefer = 0;
+
+void apj_skin_prefer(short scale)
+{
+	sk_prefer = (scale == 100 || scale == 125 || scale == 175) ? scale : 0;
+}
+
+short apj_skin_preferred(void)
+{
+	return sk_prefer;
+}
+
 static short pick_scale(short vh)
 {
 	short w = screen_width(vh);
 
+	if (sk_prefer)
+		return sk_prefer;
 	if (w < 1024)
 		return 100;
 	if (w < 1600)
@@ -594,6 +610,13 @@ static const char *theme_skin(short scale)
  * an app started any other way would look in the wrong place - so ask the
  * shell where we came from rather than trusting the cwd.
  */
+static void progdir(char *out, long n);
+
+void apj_skin_progdir(char *out, long n)
+{
+	progdir(out, n);
+}
+
 static void progdir(char *out, long n)
 {
 	char cmd[160], tail[132], *bs;		/* cmd shorter than out: no truncation */

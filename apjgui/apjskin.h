@@ -97,6 +97,9 @@ const char *apj_skin_wanted(void);
 const char *apj_skin_tried(void);
 
 short apj_skin_scale(void);				/* 100, 125, 175           */
+void  apj_skin_prefer(short scale);		/* 0 = by screen; else fixed - before load */
+short apj_skin_preferred(void);
+void  apj_skin_progdir(char *out, long n);	/* "C:\\PATH\\", or "" */
 short apj_skin_m(short pt);				/* points -> device pixels */
 short apj_skin_tilew(void);
 short apj_skin_tileh(void);
