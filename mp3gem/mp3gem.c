@@ -136,11 +136,9 @@ static int scan_wait = 0;           /* ticks since the scan last got an answer *
  * not read yet, so asking for all of them lets its worker run through the
  * folder back to back instead of one file per two ticks (queue on one,
  * collect on the next). The calls themselves are cheap - the host never
- * blocks in FILELEN. A folder that stops answering (a share that has gone
- * away, a worker that lost a file) is given up after a minute without any
- * answer rather than holding the status line at "timing" for ever - a
- * minute, because the worker reads the folder in order and a slow file
- * legitimately makes every file behind it wait.
+ * blocks in FILELEN. A folder that stops answering is polled more slowly
+ * after a minute, never abandoned: results that were thrown away once
+ * turned out to be merely late.
  */
 static int scan_step(void)
 {
@@ -148,6 +146,12 @@ static int scan_step(void)
     int i, calls = 0, pending = 0, progress = 0, relist = 0;
 
     if (!have_filelen || scan_done)
+        return 0;
+    /* a folder that has gone quiet - no answer for a minute - is still
+     * asked, but every four seconds instead of four times a second: the
+     * host may simply be slow, and an answer that comes late is still
+     * an answer. Nothing is ever given up. */
+    if (scan_wait >= 240 && (scan_wait++ & 15) != 0)
         return 0;
     for (i = 0; i < ntracks; i++) {
         long v;
@@ -184,13 +188,8 @@ static int scan_step(void)
         scan_wait = 0;
         ui.ntimed = (short)scanned;
         scan_shown = 0;               /* the status line says how far we are */
-    } else if (pending && ++scan_wait >= 240) {   /* a minute with no answer at all */
-        for (i = 0; i < ntracks; i++)
-            if (tlen[i] < 0)
-                tlen[i] = 0;          /* unknown, and no longer asked for */
-        pending = 0;
-        ui.ntimed = (short)ntracks;
-        scan_shown = 0;
+    } else if (pending && scan_wait < 240) {
+        scan_wait++;
     }
     if (!pending)
         scan_done = 1;
