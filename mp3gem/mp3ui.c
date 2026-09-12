@@ -24,12 +24,7 @@
 
 #define M(pt)		apj_skin_m(pt)
 
-/*
- * Temporary. Puts the timer tick count and the raw MP3PLAY answers on the
- * status line, so a screenshot says whether the event loop is running and
- * what the host is actually returning. Delete once the clock is trusted.
- */
-#define MP3UI_DEBUG	1
+
 
 static void draw_plain(MP3UI *u, short vh);
 
@@ -629,12 +624,7 @@ static void draw_status(MP3UI *u, short vh)
 		         apj_skin_pen(APJ_X_MUTED), u->dir);
 }
 
-/*
- * What the timer repaints. The status line belongs here too: leaving it to
- * the full redraw meant the track count, the path and the debug counters
- * sat stale between them - which is exactly what made the clock look
- * frozen when it was not.
- */
+/* seek + transport: what a hover or a press repaints */
 void mp3ui_draw_band(MP3UI *u, short vh)
 {
 	if (!apj_skin_ok())
@@ -644,8 +634,47 @@ void mp3ui_draw_band(MP3UI *u, short vh)
 	}
 	draw_seek(u, vh);
 	draw_transport(u, vh);
+	ui_font(vh, F_BODY);
+}
+
+/*
+ * What the timer repaints: the seek strip and nothing else. Every redraw
+ * takes the AES's update lock and blends antialiased text on the 68k; a
+ * whole-band repaint four times a second was enough to make dragging
+ * another window jerky while a track played.
+ */
+void mp3ui_draw_clock(MP3UI *u, short vh)
+{
+	if (!apj_skin_ok())
+	{
+		draw_plain(u, vh);
+		return;
+	}
+	draw_seek(u, vh);
+	ui_font(vh, F_BODY);
+}
+
+void mp3ui_draw_status(MP3UI *u, short vh)
+{
+	if (!apj_skin_ok())
+		return;
 	draw_status(u, vh);
 	ui_font(vh, F_BODY);
+}
+
+void mp3ui_clock_rect(MP3UI *u, GRECT *r)
+{
+	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, W_SEEK);
+
+	if (!l)
+	{
+		*r = u->work;
+		return;
+	}
+	r->g_x = (short) (u->work.g_x + M(PAD));
+	r->g_y = l->y;
+	r->g_w = (short) (u->work.g_w - 2 * M(PAD));
+	r->g_h = l->h;
 }
 
 /*

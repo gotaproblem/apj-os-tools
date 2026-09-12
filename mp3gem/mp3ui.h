@@ -24,6 +24,10 @@ enum
 
 #define MP3UI_MAXLAY	(W_N + 2)
 
+/* 1 puts the timer tick count and the raw MP3PLAY answers on the status
+ * line - the readout that found the inverted MU_M1 flag. Off now. */
+#define MP3UI_DEBUG	0
+
 typedef struct
 {
 	/* what the NatFeat told us */
@@ -64,8 +68,13 @@ typedef struct
 
 void  mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh);
 void  mp3ui_draw  (MP3UI *u, short vh);
-void  mp3ui_draw_band(MP3UI *u, short vh);	/* seek + transport only */
-void  mp3ui_draw_list(MP3UI *u, short vh);	/* the playlist only     */
+void  mp3ui_draw_band(MP3UI *u, short vh);	/* seek + transport       */
+void  mp3ui_draw_clock(MP3UI *u, short vh);	/* the seek strip only    */
+void  mp3ui_draw_status(MP3UI *u, short vh);	/* the bottom line only   */
+void  mp3ui_draw_list(MP3UI *u, short vh);	/* the playlist only      */
+
+/* the seek strip's rectangle, for a redraw of just that */
+void  mp3ui_clock_rect(MP3UI *u, GRECT *r);
 short mp3ui_hit   (MP3UI *u, short mx, short my);
 short mp3ui_row_at(MP3UI *u, short my);		/* playlist row, or -1   */
 

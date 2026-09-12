@@ -247,8 +247,12 @@ static void stop_track(void)
 
 /* ------------------------------------------------------------- drawing --- */
 
-static void draw_all(void)  { mp3ui_draw(&ui, vh); }
-static void draw_band(void) { mp3ui_draw_band(&ui, vh); }
+static void draw_all(void)    { mp3ui_draw(&ui, vh); }
+static void draw_band(void)   { mp3ui_draw_band(&ui, vh); }
+static void draw_clock(void)  { mp3ui_draw_clock(&ui, vh); }
+#if MP3UI_DEBUG
+static void draw_status(void) { mp3ui_draw_status(&ui, vh); }
+#endif
 
 static void draw_iconic(void)
 {
@@ -280,6 +284,15 @@ static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
 }
 
 static void draw_list(void) { mp3ui_draw_list(&ui, vh); }
+
+/* just the seek strip: the position moved */
+static void redraw_clock(void)
+{
+    GRECT r;
+
+    mp3ui_clock_rect(&ui, &r);
+    redraw(draw_clock, r.g_x, r.g_y, r.g_w, r.g_h);
+}
 
 /* the list's own rectangle, so a scroll repaints nothing else */
 static void redraw_list(void)
@@ -779,13 +792,16 @@ int main(int argc, char *argv[])
         }
         if (ev & MU_TIMER) {
             int relist = scan_step();
+            int clock = 0;
 
             ui.dbg_ticks++;
             if (ui.playing && !ui.paused) {
                 long p = nf_call(mp3id | NF_MP3_POS);
                 ui.dbg_pos = p;
-                if (p >= 0)
+                if (p >= 0 && p != ui.pos_s) {
                     ui.pos_s = p;
+                    clock = 1;            /* once a second, not every tick */
+                }
                 ui.dbg_status = nf_call(mp3id | NF_MP3_STATUS);
                 if (ui.dbg_status == 0) {
                     if (ui.repeat)
@@ -796,10 +812,21 @@ int main(int argc, char *argv[])
                     continue;
                 }
             }
+            /*
+             * Repaint only what changed. Every redraw takes the AES update
+             * lock and blends antialiased text on the 68k, and doing the
+             * whole band four times a second made dragging other windows
+             * jerky while a track played.
+             */
             if (!iconified) {
-                redraw(draw_band, wx, wy, ww, wh);
+                if (clock)
+                    redraw_clock();
                 if (relist)
                     redraw_list();
+#if MP3UI_DEBUG
+                if (clock || (ui.dbg_ticks & 3) == 0)
+                    redraw(draw_status, wx, wy, ww, wh);
+#endif
             }
         }
     }
