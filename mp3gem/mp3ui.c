@@ -283,9 +283,9 @@ static void draw_seek(MP3UI *u, short vh)
 	hhmmss(a, u->pos_s);
 	sprintf(b, "-%ld:%02ld", (u->len_s - u->pos_s) / 60L,
 	        (u->len_s - u->pos_s) % 60L);
-	apj_text(vh, (short) (u->work.g_x + M(PAD)), (short) (ty - cellh(vh) / 3),
+	apj_skin_text(vh, (short) (u->work.g_x + M(PAD)), (short) (ty - cellh(vh) / 3),
 	         apj_skin_pen(APJ_X_MUTED), a);
-	apj_text(vh, (short) (l->x + l->w + M(6)), (short) (ty - cellh(vh) / 3),
+	apj_skin_text(vh, (short) (l->x + l->w + M(6)), (short) (ty - cellh(vh) / 3),
 	         apj_skin_pen(APJ_X_MUTED), b);
 }
 
@@ -343,12 +343,12 @@ static void draw_now(MP3UI *u, short vh)
 	ix = (short) (l->x + l->w + M(GAPX));
 
 	ui_font(vh, F_TITLE);
-	apj_text(vh, ix, (short) (l->y + M(4)), apj_skin_pen(APJ_R_TEXT),
+	apj_skin_text(vh, ix, (short) (l->y + M(4)), apj_skin_pen(APJ_R_TEXT),
 	         u->title ? u->title : "");
 	by = (short) (l->y + M(4) + cellh(vh) + M(4));
 
 	ui_font(vh, F_BODY);
-	apj_text(vh, ix, by, apj_skin_pen(APJ_X_MUTED), u->sub ? u->sub : "");
+	apj_skin_text(vh, ix, by, apj_skin_pen(APJ_X_MUTED), u->sub ? u->sub : "");
 	by = (short) (by + cellh(vh) + M(10));
 
 	ui_font(vh, F_SMALL);
@@ -359,7 +359,7 @@ static void draw_now(MP3UI *u, short vh)
 		short w = (short) (cw * (short) strlen(u->codec) + M(12));
 
 		apj_skin_9(vh, APJ_RG_BADGE, 0, ix, by, w, M(BADGEH));
-		apj_text(vh, (short) (ix + M(6)),
+		apj_skin_text(vh, (short) (ix + M(6)),
 		         (short) (by + (M(BADGEH) - ch) / 2),
 		         apj_skin_pen(APJ_X_MUTED), u->codec);
 		ix = (short) (ix + w + M(6));
@@ -371,7 +371,7 @@ static void draw_now(MP3UI *u, short vh)
 		sprintf(buf, "%d kbps", (int) u->bitrate);
 		w = (short) (cw * (short) strlen(buf) + M(12));
 		apj_skin_9(vh, APJ_RG_BADGE, 0, ix, by, w, M(BADGEH));
-		apj_text(vh, (short) (ix + M(6)),
+		apj_skin_text(vh, (short) (ix + M(6)),
 		         (short) (by + (M(BADGEH) - ch) / 2),
 		         apj_skin_pen(APJ_X_MUTED), buf);
 		ix = (short) (ix + w + M(6));
@@ -382,7 +382,7 @@ static void draw_now(MP3UI *u, short vh)
 
 		apj_skin_9(vh, APJ_RG_BADGE, u->playing && !u->paused ? 1 : 0,
 		           ix, by, w, M(BADGEH));
-		apj_text(vh, (short) (ix + M(6)),
+		apj_skin_text(vh, (short) (ix + M(6)),
 		         (short) (by + (M(BADGEH) - ch) / 2),
 		         apj_skin_pen(u->playing && !u->paused ? APJ_X_ACCENT_INK
 		                                               : APJ_X_MUTED), st);
@@ -425,16 +425,16 @@ static void draw_list(MP3UI *u, short vh)
 		else
 		{
 			sprintf(tbuf, "%d", (int) (i + 1));
-			apj_text(vh, (short) (l->x + M(12)),
+			apj_skin_text(vh, (short) (l->x + M(12)),
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(APJ_X_MUTED), tbuf);
 		}
-		apj_text(vh, (short) (l->x + M(34)), (short) (iy + (u->rowh - ch) / 2),
+		apj_skin_text(vh, (short) (l->x + M(34)), (short) (iy + (u->rowh - ch) / 2),
 		         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), nm);
 		if (u->len_of)
 		{
 			hhmmss(tbuf, u->len_of(u->ctx, i));
-			apj_text(vh,
+			apj_skin_text(vh,
 			         (short) (l->x + l->w - M(12) - cw * (short) strlen(tbuf)),
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(APJ_X_MUTED), tbuf);
@@ -452,10 +452,10 @@ static void draw_status(MP3UI *u, short vh)
 	y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
 
 	sprintf(buf, "%d tracks", (int) u->ntracks);
-	apj_text(vh, (short) (u->work.g_x + M(PAD)), y,
+	apj_skin_text(vh, (short) (u->work.g_x + M(PAD)), y,
 	         apj_skin_pen(APJ_X_MUTED), buf);
 	if (u->dir)
-		apj_text(vh, (short) (u->work.g_x + M(PAD) + cellw(vh) * 14), y,
+		apj_skin_text(vh, (short) (u->work.g_x + M(PAD) + cellw(vh) * 14), y,
 		         apj_skin_pen(APJ_X_MUTED), u->dir);
 }
 

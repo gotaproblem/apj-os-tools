@@ -83,6 +83,7 @@ struct reg
 static short  sk_ok = 0;
 static short  sk_scale = 100;
 static short  sk_w, sk_h, sk_planes;
+static short  sk_aa = 0;		/* 1 = XaAES's pens agree with the skin */
 static short  sk_tilew, sk_tileh, sk_accd;
 static short  sk_gsz, sk_gcols, sk_nglyph, sk_maskw;
 static char   sk_name[16] = "";
@@ -198,6 +199,23 @@ static void copy(short vh, short sx, short sy, short sw, short sh,
 	pxy[4] = dx;          pxy[5] = dy;
 	pxy[6] = dx + sw - 1; pxy[7] = dy + sh - 1;
 	vro_cpyfm(vh, S_ONLY, pxy, &sk_mfdb, &scr);
+}
+
+/*
+ * Text in a skinned window. Through XaAES's atlas when its pens are ours to
+ * use, and through the VDI on our own workstation when they are not - or
+ * whenever the pen is one of the six extras, which only ever exist here.
+ */
+void apj_skin_text(short vh, short x, short y, short pen, const char *s)
+{
+	if (sk_ok && (!sk_aa || pen < APJ_PEN_BASE))
+	{
+		vswr_mode(vh, MD_TRANS);
+		vst_color(vh, pen);
+		v_gtext(vh, x, y, (char *) s);
+		return;
+	}
+	apj_text(vh, x, y, pen, s);
 }
 
 void apj_skin_blit(short vh, short rid, short state, short x, short y)
@@ -484,9 +502,33 @@ static short pick_scale(short vh)
 	return 175;
 }
 
-/* the skin the desktop's theme asks for; "FLTD" until XaAES can say */
+/* perceived brightness of an 0xRRGGBB, 0..255 */
+static short lum(long c)
+{
+	return (short) ((((c >> 16) & 0xff) * 30L + ((c >> 8) & 0xff) * 59L +
+	                  (c & 0xff) * 11L) / 100L);
+}
+
+/* the desktop's nineteen role colours, if a theme is loaded at all */
+static short theme_rgb(long *rgb)
+{
+	return appl_control(-1, 115, rgb) == APJ_R_N ? 1 : 0;
+}
+
+/*
+ * "The skin follows the theme." XaAES cannot tell us the theme's NAME, but
+ * opcode 115 gives us its colours, and the one thing that has to match is
+ * whether the ground is light or dark: get that wrong and the desktop's
+ * text pens are unreadable on the skin. So pick the light or the dark skin
+ * from the theme's own PANEL, and fall back to the dark one when there is
+ * no theme at all.
+ */
 static const char *theme_skin(void)
 {
+	long rgb[APJ_R_N];
+
+	if (theme_rgb(rgb) && lum(rgb[APJ_R_PANEL]) >= 128)
+		return "FLTL";
 	return "FLTD";
 }
 
@@ -760,6 +802,22 @@ short apj_skin_load(short vh, const char *name)
 
 	sk_ok = 1;
 	put_pens(vh);
+
+	/*
+	 * XaAES's antialiased text is drawn on the AES's own workstation with
+	 * the AES's own pens; ours are invisible to it. Fine while the theme
+	 * and the skin agree, unreadable when they do not - a dark skin under a
+	 * light theme paints the theme's dark text on the skin's dark panel.
+	 * When they disagree apj_skin_text() gives up the antialiasing and
+	 * draws in the skin's own colours, which is the lesser loss.
+	 */
+	{
+		long rgb[APJ_R_N];
+
+		sk_aa = theme_rgb(rgb) &&
+		        ((lum(rgb[APJ_R_PANEL]) >= 128) ==
+		         (lum(sk_pal[APJ_R_PANEL]) >= 128));
+	}
 	return 1;
 }
 

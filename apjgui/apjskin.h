@@ -113,6 +113,10 @@ void  apj_skin_tile   (short vh, short g, short state, short x, short y);
 void  apj_skin_tileacc(short vh, short g, short state, short x, short y);
 void  apj_skin_glyph  (short vh, short g, short pen, short x, short y);
 
+/* text in a skinned window - use this, not apj_text(), so a skin that does
+ * not match the desktop theme still comes out readable */
+void  apj_skin_text   (short vh, short x, short y, short pen, const char *s);
+
 /* size of one state of a region, in device pixels */
 void  apj_skin_size(short rid, short *w, short *h);
 
