@@ -247,20 +247,27 @@ static void stop_track(void)
 
 /* ------------------------------------------------------------- drawing --- */
 
-static void draw_all(void)    { mp3ui_draw(&ui, vh); }
-static void draw_band(void)   { mp3ui_draw_band(&ui, vh); }
-static void draw_clock(void)  { mp3ui_draw_clock(&ui, vh); }
+/*
+ * Each drawing function gets the rectangle it is being asked for. Most
+ * ignore it - they draw one small thing - but draw_all draws only what
+ * meets it, which is what makes a WM_REDRAW for a thin exposed strip
+ * cheap.
+ */
+static void draw_all(const GRECT *c)    { mp3ui_draw_clip(&ui, vh, c); }
+static void draw_band(const GRECT *c)   { (void)c; mp3ui_draw_band(&ui, vh); }
+static void draw_clock(const GRECT *c)  { (void)c; mp3ui_draw_clock(&ui, vh); }
 #if MP3UI_DEBUG
-static void draw_status(void) { mp3ui_draw_status(&ui, vh); }
+static void draw_status(const GRECT *c) { (void)c; mp3ui_draw_status(&ui, vh); }
 #endif
 
-static void draw_iconic(void)
+static void draw_iconic(const GRECT *c)
 {
+    (void)c;
     apj_fill(vh, wx, wy, ww, wh, apj_pen(APJ_R_PANEL));
 }
 
 /* Walk the AES rectangle list, clip, and call fn for each visible part. */
-static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
+static void redraw(void (*fn)(const GRECT *), short rx, short ry, short rw, short rh)
 {
     GRECT r, d = { rx, ry, rw, rh };
 
@@ -274,7 +281,7 @@ static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
         GRECT i = r;
         if (rc_intersect(&d, &i)) {
             apj_clip(vh, i.g_x, i.g_y, i.g_w, i.g_h);
-            fn();
+            fn(&i);
         }
         wind_get(win, WF_NEXTXYWH, &r.g_x, &r.g_y, &r.g_w, &r.g_h);
     }
@@ -283,7 +290,7 @@ static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
     wind_update(END_UPDATE);
 }
 
-static void draw_list(void) { mp3ui_draw_list(&ui, vh); }
+static void draw_list(const GRECT *c) { (void)c; mp3ui_draw_list(&ui, vh); }
 
 /* just the seek strip: the position moved */
 static void redraw_clock(void)

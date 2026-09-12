@@ -345,6 +345,20 @@ int main(int argc, char **argv)
 	if (blits > 400)
 		fail("too many blits for one redraw", blits, 400);
 
+	/* a WM_REDRAW for a thin strip - what a window dragged across us
+	 * sends, many times - must not cost a whole redraw */
+	{
+		GRECT strip;
+		long full = blits;
+
+		strip.g_x = 40; strip.g_y = (short) (40 + H / 2); strip.g_w = W; strip.g_h = 6;
+		blits = 0;
+		mp3ui_draw_clip(&u, vh, &strip);
+		printf("6 px strip redraw: %ld blits (full was %ld)\n", blits, full);
+		if (blits > full / 3)
+			fail("strip redraw not much cheaper than a full one", blits, full);
+	}
+
 	/* hit-testing must agree with what was drawn */
 	{
 		const APJ_LAY *l = apj_lay_find(u.lay, u.nlay, W_PLAY);

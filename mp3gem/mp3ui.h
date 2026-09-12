@@ -61,6 +61,7 @@ typedef struct
 
 	/* filled in by mp3ui_layout() */
 	GRECT  work;
+	GRECT  clip;			/* what the current redraw may touch  */
 	APJ_LAY lay[MP3UI_MAXLAY];
 	short  nlay;
 	short  rowh, visrows;
@@ -68,6 +69,8 @@ typedef struct
 
 void  mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh);
 void  mp3ui_draw  (MP3UI *u, short vh);
+/* the same, but only the parts that meet clip - what WM_REDRAW wants */
+void  mp3ui_draw_clip(MP3UI *u, short vh, const GRECT *clip);
 void  mp3ui_draw_band(MP3UI *u, short vh);	/* seek + transport       */
 void  mp3ui_draw_clock(MP3UI *u, short vh);	/* the seek strip only    */
 void  mp3ui_draw_status(MP3UI *u, short vh);	/* the bottom line only   */

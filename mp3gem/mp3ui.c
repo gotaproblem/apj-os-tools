@@ -91,6 +91,13 @@ static void fit_text(short vh, char *out, short outsz, const char *s, short avai
 	strcpy(out + max - 3, "...");
 }
 
+/* does this rectangle meet the redraw clip? */
+static int vis(const MP3UI *u, short x, short y, short w, short h)
+{
+	return !(x >= u->clip.g_x + u->clip.g_w || x + w <= u->clip.g_x ||
+	         y >= u->clip.g_y + u->clip.g_h || y + h <= u->clip.g_y);
+}
+
 static short cellw(short vh)
 {
 	short a[10];
@@ -186,6 +193,7 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 
 	u->work.g_x = wx; u->work.g_y = wy;
 	u->work.g_w = ww; u->work.g_h = wh;
+	u->clip = u->work;
 	u->nlay = 0;
 	u->lay[0].id = -1;
 
@@ -352,7 +360,7 @@ static void tilew_at(MP3UI *u, short vh, short id, short glyph, short on)
 {
 	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, id);
 
-	if (l)
+	if (l && vis(u, l->x, l->y, l->w, l->h))
 		apj_skin_tile(vh, glyph, state_of(u, id, on), l->x, l->y);
 }
 
@@ -362,7 +370,7 @@ static void draw_seek(MP3UI *u, short vh)
 	short th = M(SEEKH), ty, fw, kn = M(KNOB);
 	char a[24], b[32];
 
-	if (!l)
+	if (!l || !vis(u, u->work.g_x, l->y, u->work.g_w, l->h))
 		return;
 	ty = (short) (l->y + (l->h - th) / 2);
 
@@ -416,13 +424,13 @@ static void draw_transport(MP3UI *u, short vh)
 	}
 
 	l = apj_lay_find(u->lay, u->nlay, W_PLAY);
-	if (l)
+	if (l && vis(u, l->x, l->y, l->w, l->h))
 		apj_skin_tileacc(vh,
 		    (u->playing && !u->paused) ? APJ_G_PAUSE : APJ_G_PLAY,
 		    state_of(u, W_PLAY, 0), l->x, l->y);
 
 	l = u->hasvol ? apj_lay_find(u->lay, u->nlay, W_VOL) : NULL;
-	if (l)
+	if (l && vis(u, l->x, l->y, l->w, l->h))
 	{
 		short th = M(SEEKH), ty = (short) (l->y + (l->h - th) / 2);
 
@@ -441,10 +449,15 @@ static void draw_now(MP3UI *u, short vh)
 
 	if (!l)
 		return;
+	if (!vis(u, u->work.g_x, l->y, u->work.g_w, l->h))
+		return;
+	if (vis(u, l->x, l->y, l->w, l->h))
+	{
 	apj_skin_blit(vh, APJ_RG_ARTPH, 0, l->x, l->y);
 	if (u->hasart && u->artbuf)
 		blit_art(u, vh, (short) (l->x + (l->w - u->artedge) / 2),
 		         (short) (l->y + (l->h - u->artedge) / 2));
+	}
 
 	ix = (short) (l->x + l->w + M(GAPX));
 
@@ -510,7 +523,7 @@ static void draw_list(MP3UI *u, short vh)
 	ui_font(vh, F_BODY);
 	ch = cellh(vh);
 	cw = cellw(vh);
-	if (!l)
+	if (!l || !vis(u, l->x, l->y, l->w, l->h))
 		return;
 	apj_skin_9(vh, APJ_RG_GROUP, 0, l->x, l->y, l->w, l->h);
 
@@ -523,6 +536,11 @@ static void draw_list(MP3UI *u, short vh)
 
 		if (i >= u->ntracks)
 			break;
+		if (!vis(u, l->x, iy, l->w, u->rowh))
+		{
+			iy = (short) (iy + u->rowh);
+			continue;
+		}
 		nm = u->name_of ? u->name_of(u->ctx, i) : "";
 
 		if (sel)
@@ -607,6 +625,8 @@ static void draw_status(MP3UI *u, short vh)
 
 	ui_font(vh, F_SMALL);
 	y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
+	if (!vis(u, u->work.g_x, y, u->work.g_w, cellh(vh)))
+		return;
 	apj_fill(vh, (short) (u->work.g_x + M(PAD)), y,
 	         (short) (u->work.g_w - 2 * M(PAD)), cellh(vh),
 	         apj_skin_pen(APJ_R_PANEL));
@@ -748,8 +768,57 @@ static void draw_plain(MP3UI *u, short vh)
 	}
 }
 
+/*
+ * A redraw of the parts that meet clip - what a WM_REDRAW wants. While
+ * another window is dragged across this one XaAES exposes it a thin strip
+ * at a time, and drawing everything clipped to each strip - forty-odd
+ * blits and a dozen antialiased strings per strip - was what made the
+ * drag stutter over the player.
+ */
+void mp3ui_draw_clip(MP3UI *u, short vh, const GRECT *clip)
+{
+	GRECT c = *clip;
+
+	/* intersect with the work area */
+	if (c.g_x < u->work.g_x) { c.g_w -= u->work.g_x - c.g_x; c.g_x = u->work.g_x; }
+	if (c.g_y < u->work.g_y) { c.g_h -= u->work.g_y - c.g_y; c.g_y = u->work.g_y; }
+	if (c.g_x + c.g_w > u->work.g_x + u->work.g_w) c.g_w = (short) (u->work.g_x + u->work.g_w - c.g_x);
+	if (c.g_y + c.g_h > u->work.g_y + u->work.g_h) c.g_h = (short) (u->work.g_y + u->work.g_h - c.g_y);
+	if (c.g_w <= 0 || c.g_h <= 0)
+		return;
+	u->clip = c;
+
+	if (!apj_skin_ok())
+	{
+		draw_plain(u, vh);
+		u->clip = u->work;
+		return;
+	}
+	ui_font(vh, F_BODY);
+	apj_fill(vh, c.g_x, c.g_y, c.g_w, c.g_h, apj_skin_pen(APJ_R_PANEL));
+	{
+		short bw_, bh_;
+
+		apj_skin_size(APJ_RG_PANELTOP, &bw_, &bh_);
+		if (vis(u, u->work.g_x, u->work.g_y, u->work.g_w, bh_))
+			apj_skin_tilex(vh, APJ_RG_PANELTOP, 0, u->work.g_x, u->work.g_y,
+			               u->work.g_w);
+	}
+	if (0)
+		apj_skin_tilex(vh, APJ_RG_PANELTOP, 0, u->work.g_x, u->work.g_y,
+		               u->work.g_w);
+	draw_now(u, vh);
+	draw_seek(u, vh);
+	draw_transport(u, vh);
+	draw_list(u, vh);
+	draw_status(u, vh);
+	ui_font(vh, F_BODY);
+	u->clip = u->work;
+}
+
 void mp3ui_draw(MP3UI *u, short vh)
 {
+	u->clip = u->work;
 	if (!apj_skin_ok())
 	{
 		draw_plain(u, vh);
