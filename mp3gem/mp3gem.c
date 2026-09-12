@@ -65,8 +65,9 @@ static int   iconified = 0;
 
 static char  dir[256]  = "";              /* playlist directory (GEMDOS path) */
 static char  list[MAXTRACKS][NAMELEN];
-static long  tlen[MAXTRACKS];             /* seconds, 0 = not known yet */
+static long  tlen[MAXTRACKS];             /* seconds; -1 = not asked/answered yet, 0 = unknown */
 static int   scanned = 0;                 /* how many of those are filled in */
+static int   scan_done = 0;               /* nothing left to ask */
 static int   ntracks = 0;
 static int   have_filelen = 1;            /* cleared if the host has no sub-op 11 */
 
@@ -99,7 +100,7 @@ static const char *name_of(void *c, short i)
 static long len_of(void *c, short i)
 {
     (void)c;
-    return (i >= 0 && i < ntracks) ? tlen[i] : 0L;
+    return (i >= 0 && i < ntracks && tlen[i] > 0) ? tlen[i] : 0L;
 }
 
 /*
@@ -114,54 +115,82 @@ static void scan_reset(void)
     int i;
 
     for (i = 0; i < MAXTRACKS; i++)
-        tlen[i] = 0;
+        tlen[i] = -1;
     scanned = 0;
+    scan_done = 0;
 }
 
 /*
- * One question per timer tick, and the host is not allowed to make us
- * wait for the answer. A NatFeat runs inline on the 68k, and a handler
- * that took a second to mpg123_scan() a file stalled the whole guest for
- * that second - long enough to wedge the timer interrupts, which is what
- * stopped the clock. Sub-op 11 now answers -2 while a host thread does
- * the reading; we just ask about the same file again next tick.
- * Returns 1 if a visible row got its duration and the list should redraw.
+ * The host is not allowed to make us wait for a length. A NatFeat runs
+ * inline on the 68k, and a handler that took a second to mpg123_scan() a
+ * file stalled the whole guest for that second - long enough to wedge the
+ * timer interrupts, which is what stopped the clock. Sub-op 11 answers -2
+ * while a host thread does the reading; we ask again next tick.
  */
 static int scan_shown = 1;          /* status line reflects ui.ntimed */
-static int scan_wait = 0;           /* ticks the current file has been pending */
+static int scan_wait = 0;           /* ticks since the scan last got an answer */
 
+/*
+ * One tick of the length scan. Every file still without a length is asked
+ * for, not just the next one: the host answers -2 and queues a file it has
+ * not read yet, so asking for all of them lets its worker run through the
+ * folder back to back instead of one file per two ticks (queue on one,
+ * collect on the next). The calls themselves are cheap - the host never
+ * blocks in FILELEN. A folder that stops answering (a share that has gone
+ * away, a worker that lost a file) is given up after 15 s without an
+ * answer rather than holding the status line at "timing" for ever.
+ */
 static int scan_step(void)
 {
     char path[400];
-    const char *nm;
-    long v;
+    int i, calls = 0, pending = 0, progress = 0, relist = 0;
 
-    if (!have_filelen || scanned >= ntracks)
+    if (!have_filelen || scan_done)
         return 0;
-    nm = list[scanned];
-    snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
-    v = nf_call(mp3id | NF_MP3_FILELEN, path);
-    if (v == -2) {                    /* still reading: same file next tick */
-        /* ... but not for ever. A file the host never answers for (a full
-         * scan over a slow share, or a worker that has lost it) must not
-         * hold up the twenty behind it: after 15 s call it unknown. */
-        if (++scan_wait < 60)
+    for (i = 0; i < ntracks; i++) {
+        long v;
+
+        if (tlen[i] >= 0)
+            continue;
+        if (calls >= 32) {            /* enough traps for one tick */
+            pending++;
+            continue;
+        }
+        snprintf(path, sizeof(path), "%.255s\\%.63s", dir, list[i]);
+        v = nf_call(mp3id | NF_MP3_FILELEN, path);
+        calls++;
+        if (v == -2) {
+            pending++;
+            continue;
+        }
+        if (v < 0) {                  /* an older emulator: stop asking */
+            have_filelen = 0;
+            scan_done = 1;
+            ui.ntimed = -1;
+            scan_shown = 0;
             return 0;
-        v = 0;
+        }
+        tlen[i] = v;
+        scanned++;
+        progress++;
+        if (i >= ui.top && i < ui.top + ui.visrows)
+            relist = 1;
     }
-    scan_wait = 0;
-    if (v < 0) {                      /* an older emulator: stop asking */
-        have_filelen = 0;
-        scanned = ntracks;
-        ui.ntimed = -1;
+    if (progress) {
+        scan_wait = 0;
+        ui.ntimed = (short)scanned;
+        scan_shown = 0;               /* the status line says how far we are */
+    } else if (pending && ++scan_wait >= 60) {
+        for (i = 0; i < ntracks; i++)
+            if (tlen[i] < 0)
+                tlen[i] = 0;          /* unknown, and no longer asked for */
+        pending = 0;
+        ui.ntimed = (short)ntracks;
         scan_shown = 0;
-        return 0;
     }
-    tlen[scanned] = v;
-    scanned++;
-    ui.ntimed = (short)scanned;
-    scan_shown = 0;                   /* the status line says how far we are */
-    return (scanned - 1 >= ui.top && scanned - 1 < ui.top + ui.visrows);
+    if (!pending)
+        scan_done = 1;
+    return relist;
 }
 
 /*
@@ -504,6 +533,7 @@ static int load_dir(const char *d)
     ui.ntimed = have_filelen ? 0 : -1;
     scan_shown = 0;
     scan_wait = 0;
+    scan_done = !have_filelen;
     ui.top = 0;
     ui.sel = ntracks ? 0 : -1;
     scan_reset();
