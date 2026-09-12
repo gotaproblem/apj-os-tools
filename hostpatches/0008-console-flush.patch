@@ -1,0 +1,47 @@
+From eeb35820eb36987f8e628eaee49fd72056a84d7d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 12 Sep 2026 16:30:57 +0000
+Subject: [PATCH] MP3PLAY/PSIMG: flush the console lines
+
+Under systemd the emulator's stdout is a pipe into the journal, so
+glibc buffers it 4 KB at a time: the [MP3] filelen and [PSIMG] lines
+were written but never seen. Flush after each, as kbd_usb.c already
+does for its own.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MGcLwq6U6E1QhD3W3PzuF7
+---
+ platforms/atari/audio/dmasnd_hdmi.c       | 4 ++++
+ platforms/atari/network/atari_natfeat.cpp | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index 7eea3d6..3ddba1a 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -665,6 +665,10 @@ static void *fl_worker(void *arg)
+              * file it cannot open as -1 */
+             printf("[MP3] filelen %s -> %ld s (%ld ms)\n",
+                    base ? base + 1 : path, secs, ms);
++            /* stdout is a pipe under systemd (the journal), so glibc
++             * buffers it 4 KB at a time and a line like this would sit
++             * unseen for hours - kbd_usb.c flushes for the same reason */
++            fflush(stdout);
+         }
+ 
+         pthread_mutex_lock(&fl_mx);
+diff --git a/platforms/atari/network/atari_natfeat.cpp b/platforms/atari/network/atari_natfeat.cpp
+index a8d026a..8ce79fe 100755
+--- a/platforms/atari/network/atari_natfeat.cpp
++++ b/platforms/atari/network/atari_natfeat.cpp
+@@ -5202,6 +5202,7 @@ static uae_u32 nf_call_psimg(uae_u32 subid, uaecptr params)
+       psimg_free(buf);
+ 
+       printf("[PSIMG] loaded %s as %dx%d@%dbpp\n", host, w, h, bpp);
++      fflush(stdout);
+       return 0;
+     }
+ 
+-- 
+2.43.0
+
