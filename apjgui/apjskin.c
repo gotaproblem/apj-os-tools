@@ -530,21 +530,62 @@ static short theme_rgb(long *rgb)
 	return appl_control(-1, 115, rgb) == APJ_R_N ? 1 : 0;
 }
 
+static long find_skin(const char *stem, short scale, char *path, short note);
+
 /*
  * "The skin follows the theme." XaAES cannot tell us the theme's NAME, but
- * opcode 115 gives us its colours, and the one thing that has to match is
- * whether the ground is light or dark: get that wrong and the desktop's
- * text pens are unreadable on the skin. So pick the light or the dark skin
- * from the theme's own PANEL, and fall back to the dark one when there is
- * no theme at all.
+ * opcode 115 gives us its nineteen colours, and every sheet carries the
+ * nineteen it was baked with (PALT). So open each sheet of the family we
+ * ship, read its palette, and take the one nearest the theme - a theme
+ * built from a skin's own tokens (TeraDesk's Fluent presets are) matches
+ * exactly, and any other theme still gets the skin closest to it. With no
+ * theme at all, the dark one.
  */
-static const char *theme_skin(void)
+static const char *const sk_family[] = { "FLTL", "FLTD", "GRPH", "FUJI" };
+
+static const char *theme_skin(short scale)
 {
 	long rgb[APJ_R_N];
+	long best = 0x7fffffffL;
+	const char *pick = "FLTD";
+	short i;
 
-	if (theme_rgb(rgb) && lum(rgb[APJ_R_PANEL]) >= 128)
-		return "FLTL";
-	return "FLTD";
+	if (!theme_rgb(rgb))
+		return pick;
+
+	for (i = 0; i < (short) (sizeof(sk_family) / sizeof(sk_family[0])); i++)
+	{
+		unsigned char head[HEAD_LEN], pb[APJ_R_N * 4];
+		char path[256];
+		long fh, d = 0;
+		short r;
+
+		fh = find_skin(sk_family[i], scale, path, 0);
+		if (fh < 0)
+			continue;
+		if (Fread((short) fh, (long) HEAD_LEN, head) == HEAD_LEN &&
+		    memcmp(head, "APJS", 4) == 0 &&
+		    Fseek((long) be32(head + 26), (short) fh, 0) >= 0 &&
+		    Fread((short) fh, (long) sizeof(pb), pb) == (long) sizeof(pb))
+		{
+			for (r = 0; r < APJ_R_N; r++)
+			{
+				long c = be32(pb + r * 4), t = rgb[r];
+				long dr = ((c >> 16) & 0xff) - ((t >> 16) & 0xff);
+				long dg = ((c >> 8) & 0xff) - ((t >> 8) & 0xff);
+				long db = (c & 0xff) - (t & 0xff);
+
+				d += (dr < 0 ? -dr : dr) + (dg < 0 ? -dg : dg) + (db < 0 ? -db : db);
+			}
+			if (d < best)
+			{
+				best = d;
+				pick = sk_family[i];
+			}
+		}
+		Fclose((short) fh);
+	}
+	return pick;
 }
 
 /*
@@ -573,16 +614,44 @@ static void progdir(char *out, long n)
 		out[0] = '\0';
 }
 
-static long try_open(const char *dir, const char *file, char *out)
+static long try_open(const char *dir, const char *file, char *out, short note)
 {
 	long h;
 	long n = (long) strlen(sk_tried);
 
 	sprintf(out, "%s%s", dir, file);
 	h = Fopen(out, 0);
-	if (h < 0 && n < (long) sizeof(sk_tried) - 80)
+	if (note && h < 0 && n < (long) sizeof(sk_tried) - 80)
 		sprintf(sk_tried + n, "%s%s", n ? "  " : "", dir[0] ? dir : ".\\");
 	return h;
+}
+
+/*
+ * <stem><scale>.SKN, looked for in the program's own SKINS\ folder, the
+ * program folder, SKINS\ and . under the cwd, then the system folder.
+ * note: record the folders tried in sk_tried for the "No skin" message.
+ */
+static long find_skin(const char *stem, short scale, char *path, short note)
+{
+	char pd[192], sub[224], file[24];
+	long fh = -1;
+
+	sprintf(file, "%s%d.SKN", stem, (int) scale);
+	progdir(pd, (long) sizeof(pd));
+	if (pd[0])
+	{
+		sprintf(sub, "%sSKINS\\", pd);
+		fh = try_open(sub, file, path, note);
+		if (fh < 0)
+			fh = try_open(pd, file, path, note);
+	}
+	if (fh < 0)
+		fh = try_open("SKINS\\", file, path, note);
+	if (fh < 0)
+		fh = try_open("", file, path, note);
+	if (fh < 0)
+		fh = try_open("C:\\OPT\\GEM\\SKINS\\", file, path, note);
+	return fh;
 }
 
 /*
@@ -632,7 +701,8 @@ short apj_skin_load(short vh, const char *name)
 
 	apj_skin_free();
 
-	stem = name ? name : theme_skin();
+	scale = pick_scale(vh);
+	stem = name ? name : theme_skin(scale);
 	strncpy(sk_name, stem, sizeof(sk_name) - 1);
 	sk_name[sizeof(sk_name) - 1] = '\0';
 
@@ -647,27 +717,9 @@ short apj_skin_load(short vh, const char *name)
 	}
 	else
 	{
-		char pd[192], sub[224];
-
-		scale = pick_scale(vh);
 		sprintf(sk_wanted, "%s%d.SKN", stem, (int) scale);
 		sk_tried[0] = '\0';
-
-		progdir(pd, (long) sizeof(pd));
-		fh = -1;
-		if (pd[0])
-		{
-			sprintf(sub, "%sSKINS\\", pd);
-			fh = try_open(sub, sk_wanted, path);
-			if (fh < 0)
-				fh = try_open(pd, sk_wanted, path);
-		}
-		if (fh < 0)
-			fh = try_open("SKINS\\", sk_wanted, path);
-		if (fh < 0)
-			fh = try_open("", sk_wanted, path);
-		if (fh < 0)
-			fh = try_open("C:\\OPT\\GEM\\SKINS\\", sk_wanted, path);
+		fh = find_skin(stem, scale, path, 1);
 	}
 	if (fh < 0)
 		return 0;

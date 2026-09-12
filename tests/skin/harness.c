@@ -221,6 +221,9 @@ void vqt_attributes(short h, short *a)
  * the skin's own role colours (opcode 115) so apj_pen() lines up with the
  * pens the sheet was baked against.
  */
+static long theme_pal[APJ_R_N];		/* "the desktop's theme": the sheet under test */
+static short theme_set = 0;
+
 long appl_control(short ap, short what, void *p)
 {
 	long *rgb = (long *) p;
@@ -229,10 +232,18 @@ long appl_control(short ap, short what, void *p)
 
 	if (what == 110)
 		return 1;
-	if (what == 115 && apj_skin_ok())
+	if (what == 115)
 	{
+		if (!theme_set && apj_skin_ok())
+		{
+			for (i = 0; i < APJ_R_N; i++)
+				theme_pal[i] = apj_skin_rgb(i);
+			theme_set = 1;
+		}
+		if (!theme_set)
+			return 0;
 		for (i = 0; i < APJ_R_N; i++)
-			rgb[i] = apj_skin_rgb(i);
+			rgb[i] = theme_pal[i];
 		return APJ_R_N;
 	}
 	return 0;
@@ -383,6 +394,28 @@ int main(int argc, char **argv)
 		}
 	}
 	fclose(o);
+
+	/*
+	 * The skin follows the theme. Opcode 115 above answers with THIS
+	 * sheet's palette, so a load with no name - the app's normal start -
+	 * must come back to this same sheet out of the whole family, at the
+	 * scale the fake screen wants.
+	 */
+	{
+		const char *base = strrchr(argv[1], '/');
+		char want[16];
+
+		base = base ? base + 1 : argv[1];
+		sprintf(want, "%.4s%d.SKN", base, (int) apj_skin_scale());
+		(void) appl_control(-1, 115, theme_pal);	/* latch the palette before the free */
+		if (!apj_skin_load(vh, NULL))
+			fail("follow-the-theme reload failed", 0, 0);
+		else if (strncmp(apj_skin_wanted(), want, 4) != 0)
+		{
+			fprintf(stderr, "theme %s picked %s\n", want, apj_skin_wanted());
+			fail("skin did not follow the theme", 0, 0);
+		}
+	}
 
 	apj_skin_free();
 	printf(fails ? "%d CHECK(S) FAILED\n" : "all checks passed\n", fails);
