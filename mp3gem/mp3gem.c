@@ -597,7 +597,12 @@ static void click(short mx, short my)
 
 /* ---------------------------------------------------------------- main --- */
 
-#define WIN_KIND    (NAME | CLOSER | MOVER | SIZER | SMALLER)
+/*
+ * No SIZER: XaAES's Fluent chrome reserves a 12 px column on the right of
+ * a sizeable window for it, which put the player off-centre. This is a
+ * fixed-layout player; the window is the size the skin says it is.
+ */
+#define WIN_KIND    (NAME | CLOSER | MOVER | SMALLER)
 
 #define VA_START    0x4711     /* AV protocol: open these files */
 #define AV_STARTED  0x4738
