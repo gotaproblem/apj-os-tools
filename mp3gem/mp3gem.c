@@ -127,6 +127,8 @@ static void scan_reset(void)
  * the reading; we just ask about the same file again next tick.
  * Returns 1 if a visible row got its duration and the list should redraw.
  */
+static int scan_shown = 1;          /* status line reflects ui.ntimed */
+
 static int scan_step(void)
 {
     char path[400];
@@ -143,10 +145,14 @@ static int scan_step(void)
     if (v < 0) {                      /* an older emulator: stop asking */
         have_filelen = 0;
         scanned = ntracks;
+        ui.ntimed = -1;
+        scan_shown = 0;
         return 0;
     }
     tlen[scanned] = v;
     scanned++;
+    ui.ntimed = (short)scanned;
+    scan_shown = 0;                   /* the status line says how far we are */
     return (scanned - 1 >= ui.top && scanned - 1 < ui.top + ui.visrows);
 }
 
@@ -256,9 +262,7 @@ static void stop_track(void)
 static void draw_all(const GRECT *c)    { mp3ui_draw_clip(&ui, vh, c); }
 static void draw_band(const GRECT *c)   { (void)c; mp3ui_draw_band(&ui, vh); }
 static void draw_clock(const GRECT *c)  { (void)c; mp3ui_draw_clock(&ui, vh); }
-#if MP3UI_DEBUG
 static void draw_status(const GRECT *c) { (void)c; mp3ui_draw_status(&ui, vh); }
-#endif
 
 static void draw_iconic(const GRECT *c)
 {
@@ -489,6 +493,8 @@ static int load_dir(const char *d)
     closedir(dp);
     qsort(list, ntracks, NAMELEN, cmpname);
     ui.ntracks = (short)ntracks;
+    ui.ntimed = have_filelen ? 0 : -1;
+    scan_shown = 0;
     ui.top = 0;
     ui.sel = ntracks ? 0 : -1;
     scan_reset();
@@ -921,6 +927,10 @@ int main(int argc, char *argv[])
                     redraw_clock();
                 if (relist)
                     redraw_list();
+                if (!scan_shown) {
+                    scan_shown = 1;
+                    redraw(draw_status, wx, wy, ww, wh);
+                }
 #if MP3UI_DEBUG
                 if (clock || (ui.dbg_ticks & 3) == 0)
                     redraw(draw_status, wx, wy, ww, wh);

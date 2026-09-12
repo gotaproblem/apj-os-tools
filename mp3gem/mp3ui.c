@@ -190,6 +190,27 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 		pad = 2;
 	}
 	short x, y, sy, ly, lh;
+	short sw, sh, bh, tlab, stath;
+
+	/*
+	 * The fonts do not scale with the sheet. fVDI picks the nearest of the
+	 * sizes it has (9x18 up; APJ*.FNT), so a "10 pt" small font at 100% is
+	 * still 18 px tall while a 14 pt strip is 14 px - the status line sat
+	 * on top of the playlist and "-4:40" ran off the right edge. So every
+	 * strip that holds text is sized from the cell the font really has,
+	 * and the sheet's metric is only a floor.
+	 */
+	ui_font(vh, F_SMALL);
+	sw = cellw(vh);
+	sh = cellh(vh);
+	ui_font(vh, F_BODY);
+	bh = cellh(vh);
+	tlab = (short) (sw * 6 + M(6));			/* "-88:88" and a gap */
+	if (tlab < M(46))
+		tlab = M(46);
+	stath = (short) (sh + M(4));
+	if (stath < M(STATH))
+		stath = M(STATH);
 
 	u->work.g_x = wx; u->work.g_y = wy;
 	u->work.g_w = ww; u->work.g_h = wh;
@@ -202,8 +223,8 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 
 	/* seek strip */
 	sy = (short) (wy + pad + art + (art ? M(GAPX) : 3 * cellh(vh)));
-	add(u, W_SEEK, (short) (wx + pad + M(46)), sy,
-	    (short) (ww - 2 * pad - 2 * M(46)), (short) (M(SEEKH) + M(6)));
+	add(u, W_SEEK, (short) (wx + pad + tlab), sy,
+	    (short) (ww - 2 * pad - 2 * tlab), (short) (M(SEEKH) + M(6)));
 
 	/* transport */
 	y = (short) (sy + M(22));
@@ -227,8 +248,10 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 
 	/* playlist */
 	ly = (short) (y + th + M(10));
-	lh = (short) (wy + wh - ly - pad - M(STATH));
+	lh = (short) (wy + wh - ly - pad - stath);
 	u->rowh = apj_skin_ok() ? M(ROWH) : cellh(vh);
+	if (u->rowh < bh + M(4))
+		u->rowh = (short) (bh + M(4));		/* a row never shorter than its text */
 	if (lh < u->rowh + 2)
 		lh = (short) (u->rowh + 2);
 	/* the scrollbar sits INSIDE the list's rectangle, and apj_lay_hit()
@@ -563,7 +586,7 @@ static void draw_list(MP3UI *u, short vh)
 		}
 		{
 			char clip[96];
-			short avail = (short) (l->w - M(34) - M(58) -
+			short avail = (short) (l->w - M(34) - M(12) - cw * 6 - M(8) -
 			                       (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(6) : 0));
 
 			fit_text(vh, clip, (short) sizeof(clip), nm, avail);
@@ -635,13 +658,22 @@ static void draw_status(MP3UI *u, short vh)
 	sprintf(buf, "%d tracks   t%ld p%ld s%ld", (int) u->ntracks,
 	        u->dbg_ticks, u->dbg_pos, u->dbg_status);
 #else
-	sprintf(buf, "%d tracks", (int) u->ntracks);
+	if (u->ntimed >= 0 && u->ntimed < u->ntracks)
+		sprintf(buf, "%d tracks, timing %d", (int) u->ntracks, (int) u->ntimed);
+	else
+		sprintf(buf, "%d tracks", (int) u->ntracks);
 #endif
 	apj_skin_text(vh, (short) (u->work.g_x + M(PAD)), y,
 	         apj_skin_pen(APJ_X_MUTED), buf);
 	if (u->dir)
-		apj_skin_text(vh, (short) (u->work.g_x + M(PAD) + cellw(vh) * 26), y,
-		         apj_skin_pen(APJ_X_MUTED), u->dir);
+	{
+		char fit[160];
+		short x = (short) (u->work.g_x + M(PAD) + cellw(vh) * 26);
+		short avail = (short) (u->work.g_x + u->work.g_w - M(PAD) - x);
+
+		fit_text(vh, fit, (short) sizeof(fit), u->dir, avail);
+		apj_skin_text(vh, x, y, apj_skin_pen(APJ_X_MUTED), fit);
+	}
 }
 
 /* seek + transport: what a hover or a press repaints */
