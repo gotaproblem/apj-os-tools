@@ -279,26 +279,15 @@ static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
     wind_update(END_UPDATE);
 }
 
-/*
- * The playlist scrolls through the window's vertical slider. The AES draws
- * it in the theme, in the frame column it reserves on the right anyway,
- * and turns the mouse wheel into WM_ARROWED for free.
- */
-static void set_slider(void)
-{
-    long span = (long)ui.ntracks - ui.visrows;
-    short size, pos;
+static void draw_list(void) { mp3ui_draw_list(&ui, vh); }
 
-    if (ui.ntracks <= 0 || ui.visrows <= 0 || span <= 0) {
-        size = 1000;
-        pos = 0;
-    } else {
-        size = (short)(1000L * ui.visrows / ui.ntracks);
-        if (size < 20) size = 20;
-        pos = (short)(1000L * ui.top / span);
-    }
-    wind_set(win, WF_VSLSIZE, size, 0, 0, 0);
-    wind_set(win, WF_VSLIDE, pos, 0, 0, 0);
+/* the list's own rectangle, so a scroll repaints nothing else */
+static void redraw_list(void)
+{
+    const APJ_LAY *l = apj_lay_find(ui.lay, ui.nlay, W_LIST);
+
+    if (l)
+        redraw(draw_list, l->x, l->y, l->w, l->h);
 }
 
 static void set_top(long t)
@@ -310,16 +299,16 @@ static void set_top(long t)
     if (t < 0)   t = 0;
     if ((short)t != ui.top) {
         ui.top = (short)t;
-        redraw(draw_all, wx, wy, ww, wh);
+        if (!iconified)
+            redraw_list();
     }
-    set_slider();
 }
 
 static void relayout(void)
 {
     wind_get(win, WF_WORKXYWH, &wx, &wy, &ww, &wh);
     mp3ui_layout(&ui, vh, wx, wy, ww, wh);
-    set_top(ui.top);                  /* clamps, and refreshes the slider */
+    set_top(ui.top);                  /* clamps after a resize */
 }
 
 /*
@@ -399,7 +388,6 @@ static void scroll_to(short i)
         ui.top = i;
     if (ui.visrows > 0 && i >= ui.top + ui.visrows)
         ui.top = (short)(i - ui.visrows + 1);
-    set_slider();
 }
 
 static void open_in_dir(const char *path, const char *fname)
@@ -561,17 +549,45 @@ static void click(short mx, short my)
             redraw(draw_band, wx, wy, ww, wh);
         return;
     }
+    if (id == W_SCROLL && mp3ui_scroll_needed(&ui)) {
+        short part = mp3ui_scroll_part(&ui, my);
+
+        if (part < 0)
+            set_top(ui.top - ui.visrows);
+        else if (part > 0)
+            set_top(ui.top + ui.visrows);
+        else {
+            /* drag the thumb: follow the mouse until the button goes up */
+            GRECT t;
+            short grab, bmx, bmy, bst, bks;
+
+            mp3ui_thumb_rect(&ui, &t);
+            grab = (short)(my - t.g_y);
+            ui.dragging = 1;
+            redraw_list();
+            for (;;) {
+                graf_mkstate(&bmx, &bmy, &bst, &bks);
+                if (!(bst & 1))
+                    break;
+                set_top(mp3ui_scroll_top_for(&ui, bmy, grab));
+                evnt_timer(20L);
+            }
+            ui.dragging = 0;
+            redraw_list();
+        }
+        return;
+    }
     row = mp3ui_row_at(&ui, my);
     if (row >= 0 && id == W_LIST) {
         start_track(row);
         redraw(draw_all, wx, wy, ww, wh);
     }
+    (void)mx;
 }
 
 /* ---------------------------------------------------------------- main --- */
 
-#define WIN_KIND    (NAME | CLOSER | MOVER | SIZER | SMALLER | \
-                     VSLIDE | UPARROW | DNARROW)
+#define WIN_KIND    (NAME | CLOSER | MOVER | SIZER | SMALLER)
 
 #define VA_START    0x4711     /* AV protocol: open these files */
 #define AV_STARTED  0x4738
@@ -663,7 +679,7 @@ int main(int argc, char *argv[])
                     if (msg[0] == WM_SIZED)
                         redraw(draw_all, wx, wy, ww, wh);
                     break;
-                case WM_ARROWED:      /* arrows, page clicks, mouse wheel */
+                case WM_ARROWED:      /* the mouse wheel, where XaAES sends it */
                     switch (msg[4]) {
                         case WA_UPLINE: set_top(ui.top - 1); break;
                         case WA_DNLINE: set_top(ui.top + 1); break;
@@ -671,12 +687,6 @@ int main(int argc, char *argv[])
                         case WA_DNPAGE: set_top(ui.top + ui.visrows); break;
                     }
                     break;
-                case WM_VSLID: {
-                    long span = (long)ui.ntracks - ui.visrows;
-                    if (span > 0)
-                        set_top((span * msg[4] + 500L) / 1000L);
-                    break;
-                }
                 case WM_CLOSED:
                     goto out;
                 case WM_ICONIFY:
@@ -752,8 +762,11 @@ int main(int argc, char *argv[])
                     continue;
                 }
             }
-            if (!iconified)
-                redraw(relist ? draw_all : draw_band, wx, wy, ww, wh);
+            if (!iconified) {
+                redraw(draw_band, wx, wy, ww, wh);
+                if (relist)
+                    redraw_list();
+            }
         }
     }
 

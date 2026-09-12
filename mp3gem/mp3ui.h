@@ -18,7 +18,7 @@ enum
 {
 	W_PREV, W_RW, W_PLAY, W_FF, W_NEXT, W_STOP,
 	W_SHUFFLE, W_REPEAT, W_VOLICO, W_VOL, W_SEEK,
-	W_ART, W_OPEN, W_LIST,
+	W_ART, W_OPEN, W_LIST, W_SCROLL,
 	W_N
 };
 
@@ -52,6 +52,7 @@ typedef struct
 
 	/* interaction */
 	short  hover;			/* widget id under the pointer, or -1  */
+	short  dragging;		/* 1 while the scrollbar thumb is held */
 	short  press;			/* widget id held down, or -1          */
 
 	/* filled in by mp3ui_layout() */
@@ -64,8 +65,17 @@ typedef struct
 void  mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh);
 void  mp3ui_draw  (MP3UI *u, short vh);
 void  mp3ui_draw_band(MP3UI *u, short vh);	/* seek + transport only */
+void  mp3ui_draw_list(MP3UI *u, short vh);	/* the playlist only     */
 short mp3ui_hit   (MP3UI *u, short mx, short my);
 short mp3ui_row_at(MP3UI *u, short my);		/* playlist row, or -1   */
+
+/* the scrollbar: is it needed, where is the thumb, and what does a click
+ * at my mean - -1 above the thumb, 0 on it, +1 below it */
+short mp3ui_scroll_needed(MP3UI *u);
+void  mp3ui_thumb_rect(MP3UI *u, GRECT *r);
+short mp3ui_scroll_part(MP3UI *u, short my);
+/* thumb dragged so its top is at my: the ui.top that corresponds */
+short mp3ui_scroll_top_for(MP3UI *u, short my, short grab);
 
 /* smallest window the layout still works in, in device pixels */
 void  mp3ui_minsize(short *w, short *h);

@@ -35,10 +35,10 @@ PALT_N = 32                 # 19 roles + 6 extras + reserved
 F_TILEX, F_TILEY, F_SLICE9 = 1, 2, 4
 
 RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE, \
-RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC = range(11)
-RG_N = 11
+RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL = range(12)
+RG_N = 12
 RG_NAME = ["PANELTOP","GROUP","ROWSEL","SEEK","KNOB","BADGE",
-           "ARTPH","BTN","BTNACC","TILE","TILEACC"]
+           "ARTPH","BTN","BTNACC","TILE","TILEACC","VSCROLL"]
 
 NBTNGLYPH = 19              # glyphs 0..18 get a TILE
 NACCGLYPH = 5               # glyphs 0..4 get a TILEACC
@@ -280,6 +280,18 @@ def build(skin, scale, gnames, gfiles):
             atiles.append(a.finish())
     parts[RG_TILEACC] = atiles
 
+    # --- 11 VSCROLL: the playlist scrollbar, a vertical pill on the list
+    # ground - trough, thumb, thumb while dragged
+    vw = M["scroll_w"]
+    vh_ = vw * 3 + 2
+    vs = []
+    for col in (C["ROW"], C["MUTED"], C["ACCENT"]):
+        a = Art(vw, vh_, C["PAPER"])
+        a.rrect(0, 0, vw, vh_, vw // 2, fill=col)
+        vs.append(a.finish())
+    parts[RG_VSCROLL] = vs
+    ins_vscroll = (0, vw // 2 + 1, 0, vw // 2 + 1)
+
     bw = M["border"]
     P, B = C["PANEL"], C["BORDER"]
     #   region -> [(fill, border)] per state, and the border width in px
@@ -297,6 +309,8 @@ def build(skin, scale, gnames, gfiles):
         RG_BTNACC:   ([(P, P)] * 4, 0),
         RG_TILE:     ([(P, P)] * (NBTNGLYPH * NSTATE), 0),
         RG_TILEACC:  ([(P, P)] * (NACCGLYPH * NSTATE), 0),
+        RG_VSCROLL:  ([(C["ROW"], C["ROW"]), (C["MUTED"], C["MUTED"]),
+                       (C["ACCENT"], C["ACCENT"])], 0),
     }
 
     # ------------------------------------------------------------ layout --
@@ -312,6 +326,7 @@ def build(skin, scale, gnames, gfiles):
         RG_BTNACC:   (4,  (0,0,0,0),                   0),
         RG_TILE:     (NBTNGLYPH*NSTATE, (0,0,0,0),     0),
         RG_TILEACC:  (NACCGLYPH*NSTATE, (0,0,0,0),     0),
+        RG_VSCROLL:  (3,  ins_vscroll,                 F_SLICE9),
     }
     COLS = {RG_TILE: NSTATE * 4, RG_TILEACC: NSTATE * 2}
 

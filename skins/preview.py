@@ -23,7 +23,7 @@ MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 (RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE,
- RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC) = range(11)
+ RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL) = range(12)
 
 ROLES = ["FACE","TEXT","LIGHT","DARK","SELBG","SELFG","ALBG","ALFG","PANEL","TITBG",
          "TITFG","PAPER","BORDER","HOVER","PRESSED","FOCUS","DISABLED","ELEVATION","ACCENT"]
@@ -122,6 +122,15 @@ class Skin:
             t, b = h // 2, h - h // 2
         bw = min(bw, l, r)
         dmw, dmh = w - l - r, h - t - b
+
+        if rg["ins"][0] == 0 and rg["ins"][2] == 0:      # vertical pill
+            piece(sx, sy, sw, t, x, y)
+            piece(sx, sy + sh - b, sw, b, x, y + h - b)
+            if bw:
+                bar(x, y + t, bw, dmh, bord)
+                bar(x + w - bw, y + t, bw, dmh, bord)
+            bar(x + bw, y + t, w - 2*bw, dmh, fill)
+            return
 
         if rg["ins"][1] == 0 and rg["ins"][3] == 0:      # pill
             piece(sx, sy, l, sh, x, y)
@@ -261,6 +270,14 @@ def mp3gem(sk, W_pt=480, H_pt=320):
         sk.text(im, pad + m(34), iy + m(4), t, "SELFG" if sel else "TEXT", 11)
         sk.text(im, W - pad - m(46), iy + m(4), d, "MUTED", 11)
         iy += rowh
+
+    # the scrollbar, inside the list on the right
+    svw = m(10)
+    sx_ = pad + (W - 2*pad) - m(4) - svw
+    sy_ = ly + m(4)
+    sh_ = lh - m(8)
+    sk.blit9(im, RG_VSCROLL, 0, sx_, sy_, svw, sh_)
+    sk.blit9(im, RG_VSCROLL, 1, sx_, sy_, svw, sh_ * 5 // 24 + m(10))
 
     sk.text(im, pad, H - pad - m(10), "24 tracks - 1:52:08   S:\\MUSIC\\VANGELIS",
             "MUTED", 9)

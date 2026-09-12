@@ -20,6 +20,7 @@
 #define ROWH		24
 #define STATH		14
 #define BADGEH		16
+#define SCROLLW		10	/* skin metric scroll_w */
 
 #define M(pt)		apj_skin_m(pt)
 
@@ -199,6 +200,8 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 	if (lh < u->rowh + 2)
 		lh = (short) (u->rowh + 2);
 	add(u, W_LIST, (short) (wx + pad), ly, (short) (ww - 2 * pad), lh);
+	add(u, W_SCROLL, (short) (wx + ww - pad - M(4) - M(SCROLLW)),
+	    (short) (ly + M(4)), M(SCROLLW), (short) (lh - M(8)));
 
 	u->visrows = (short) ((lh - (apj_skin_ok() ? M(8) : 0)) / u->rowh);
 	if (u->visrows < 0)
@@ -211,7 +214,8 @@ void mp3ui_bbox(MP3UI *u, GRECT *r)
 
 	for (i = 0; i < u->nlay && u->lay[i].id >= 0; i++)
 	{
-		if (u->lay[i].id == W_LIST || u->lay[i].id == W_ART)
+		if (u->lay[i].id == W_LIST || u->lay[i].id == W_ART ||
+		    u->lay[i].id == W_SCROLL)
 			continue;
 		if (u->lay[i].x < x0) x0 = u->lay[i].x;
 		if (u->lay[i].y < y0) y0 = u->lay[i].y;
@@ -227,6 +231,64 @@ void mp3ui_bbox(MP3UI *u, GRECT *r)
 	r->g_y = y0;
 	r->g_w = (short) (x1 - x0);
 	r->g_h = (short) (y1 - y0);
+}
+
+short mp3ui_scroll_needed(MP3UI *u)
+{
+	return (u->ntracks > u->visrows && u->visrows > 0) ? 1 : 0;
+}
+
+void mp3ui_thumb_rect(MP3UI *u, GRECT *r)
+{
+	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, W_SCROLL);
+	long span = (long) u->ntracks - u->visrows;
+	short th, ty;
+
+	if (!l || !mp3ui_scroll_needed(u))
+	{
+		r->g_x = r->g_y = r->g_w = r->g_h = 0;
+		return;
+	}
+	th = (short) ((long) l->h * u->visrows / u->ntracks);
+	if (th < M(SCROLLW) * 2)
+		th = (short) (M(SCROLLW) * 2);
+	if (th > l->h)
+		th = l->h;
+	ty = (short) (l->y + (long) (l->h - th) * u->top / span);
+	r->g_x = l->x;
+	r->g_y = ty;
+	r->g_w = l->w;
+	r->g_h = th;
+}
+
+short mp3ui_scroll_part(MP3UI *u, short my)
+{
+	GRECT t;
+
+	mp3ui_thumb_rect(u, &t);
+	if (my < t.g_y)
+		return -1;
+	if (my >= t.g_y + t.g_h)
+		return 1;
+	return 0;
+}
+
+short mp3ui_scroll_top_for(MP3UI *u, short my, short grab)
+{
+	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, W_SCROLL);
+	GRECT t;
+	long span = (long) u->ntracks - u->visrows, room, top;
+
+	if (!l || span <= 0)
+		return 0;
+	mp3ui_thumb_rect(u, &t);
+	room = (long) l->h - t.g_h;
+	if (room <= 0)
+		return 0;
+	top = ((long) (my - grab - l->y) * span + room / 2) / room;
+	if (top < 0)    top = 0;
+	if (top > span) top = span;
+	return (short) top;
 }
 
 short mp3ui_hit(MP3UI *u, short mx, short my)
@@ -434,7 +496,9 @@ static void draw_list(MP3UI *u, short vh)
 		if (sel)
 		{
 			apj_skin_9(vh, APJ_RG_ROWSEL, 0, (short) (l->x + M(2)), iy,
-			           (short) (l->w - M(4)), u->rowh);
+			           (short) (l->w - M(4) -
+			                    (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(8) : 0)),
+			           u->rowh);
 			if (u->playing)
 				apj_skin_glyph(vh, APJ_G_PLAY, apj_skin_pen(APJ_R_ACCENT),
 				               (short) (l->x + M(10)),
@@ -449,7 +513,8 @@ static void draw_list(MP3UI *u, short vh)
 		}
 		{
 			char clip[96];
-			short avail = (short) (l->w - M(34) - M(58));
+			short avail = (short) (l->w - M(34) - M(58) -
+			                       (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(6) : 0));
 			short max = (short) (cw > 0 ? avail / cw : 0);
 
 			if (max > (short) sizeof(clip) - 1)
@@ -473,15 +538,45 @@ static void draw_list(MP3UI *u, short vh)
 
 			if (secs > 0)
 			{
+				short right = (short) (l->x + l->w - M(12) -
+				               (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(6) : 0));
+
 				hhmmss(tbuf, secs);
 				apj_skin_text(vh,
-				         (short) (l->x + l->w - M(12) - cw * (short) strlen(tbuf)),
+				         (short) (right - cw * (short) strlen(tbuf)),
 				         (short) (iy + (u->rowh - ch) / 2),
 				         apj_skin_pen(APJ_X_MUTED), tbuf);
 			}
 		}
 		iy = (short) (iy + u->rowh);
 	}
+
+	if (mp3ui_scroll_needed(u))
+	{
+		const APJ_LAY *sb = apj_lay_find(u->lay, u->nlay, W_SCROLL);
+		GRECT t;
+
+		if (sb)
+		{
+			apj_skin_9(vh, APJ_RG_VSCROLL, APJ_VS_TROUGH, sb->x, sb->y, sb->w, sb->h);
+			mp3ui_thumb_rect(u, &t);
+			apj_skin_9(vh, APJ_RG_VSCROLL,
+			           u->dragging ? APJ_VS_HELD : APJ_VS_THUMB,
+			           t.g_x, t.g_y, t.g_w, t.g_h);
+		}
+	}
+}
+
+/* just the playlist - what a scroll repaints */
+void mp3ui_draw_list(MP3UI *u, short vh)
+{
+	if (!apj_skin_ok())
+	{
+		draw_plain(u, vh);
+		return;
+	}
+	draw_list(u, vh);
+	ui_font(vh, F_BODY);
 }
 
 static void draw_status(MP3UI *u, short vh)

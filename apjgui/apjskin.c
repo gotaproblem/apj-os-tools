@@ -313,6 +313,21 @@ void apj_skin_9(short vh, short rid, short state,
 	dmw = (short) (w - l - rr);
 	dmh = (short) (h - t - b);
 
+	if (r->l == 0 && r->r == 0)		/* vertical pill: caps top and bottom */
+	{
+		copy(vh, sx, sy, r->w, t, x, y);
+		copy(vh, sx, (short) (sy + r->h - r->b), r->w, b,
+		     x, (short) (y + h - b));
+		if (bw > 0)
+		{
+			bar(vh, x, (short) (y + t), bw, dmh, bp);
+			bar(vh, (short) (x + w - bw), (short) (y + t), bw, dmh, bp);
+		}
+		bar(vh, (short) (x + bw), (short) (y + t), (short) (w - 2 * bw),
+		    dmh, fp);
+		return;
+	}
+
 	if (r->t == 0 && r->b == 0)		/* pill: two caps, bars between */
 	{
 		copy(vh, sx, sy, l, r->h, x, y);

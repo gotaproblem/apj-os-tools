@@ -47,6 +47,7 @@
     "btnacc": 38,
     "paneltop_h": 48,
     "badge_h": 16,
-    "row_h": 24
+    "row_h": 24,
+    "scroll_w": 10
   }
 }

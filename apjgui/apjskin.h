@@ -45,6 +45,7 @@ enum
 	APJ_RG_BTNACC,		/* round accent plate, 4 states                   */
 	APJ_RG_TILE,		/* plate + glyph, APJ_G_* x 4 states              */
 	APJ_RG_TILEACC,		/* round accent plate + glyph, 5 glyphs x 4       */
+	APJ_RG_VSCROLL,		/* playlist scrollbar: trough, thumb, thumb held  */
 	APJ_RG_N
 };
 
@@ -65,6 +66,7 @@ enum
 /* --------------------------------------------------------- states etc -- */
 enum { APJ_ST_NORM, APJ_ST_HOVER, APJ_ST_PRESS, APJ_ST_ON, APJ_ST_N };
 enum { APJ_SK_TRACK, APJ_SK_BUF, APJ_SK_FILL };
+enum { APJ_VS_TROUGH, APJ_VS_THUMB, APJ_VS_HELD };
 
 /*
  * Extra palette entries the skin carries beyond the nineteen APJ_R_*
