@@ -647,6 +647,9 @@ int main(int argc, char *argv[])
         win = wind_create(WIN_KIND, cx, cy, cwid, chgt);
         wind_set_str(win, WF_NAME, "PiSTorm MP3");
         wind_open(win, cx, cy, cwid, chgt);
+        /* XaAES only sends wheel events to a window that asked for them;
+         * as WM_ARROWED with the click count in the high byte of msg[4] */
+        wind_set(win, WF_WHEEL, 1, WHEEL_ARROWED, 0, 0);
         relayout();
     }
     arm_m1();
@@ -679,14 +682,17 @@ int main(int argc, char *argv[])
                     if (msg[0] == WM_SIZED)
                         redraw(draw_all, wx, wy, ww, wh);
                     break;
-                case WM_ARROWED:      /* the mouse wheel, where XaAES sends it */
-                    switch (msg[4]) {
-                        case WA_UPLINE: set_top(ui.top - 1); break;
-                        case WA_DNLINE: set_top(ui.top + 1); break;
+                case WM_ARROWED: {    /* the mouse wheel */
+                    short n = (short)((msg[4] >> 8) & 0xff);
+                    if (n < 1) n = 1;
+                    switch (msg[4] & 15) {
+                        case WA_UPLINE: set_top(ui.top - n); break;
+                        case WA_DNLINE: set_top(ui.top + n); break;
                         case WA_UPPAGE: set_top(ui.top - ui.visrows); break;
                         case WA_DNPAGE: set_top(ui.top + ui.visrows); break;
                     }
                     break;
+                }
                 case WM_CLOSED:
                     goto out;
                 case WM_ICONIFY:

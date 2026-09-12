@@ -199,9 +199,11 @@ void mp3ui_layout(MP3UI *u, short vh, short wx, short wy, short ww, short wh)
 	u->rowh = apj_skin_ok() ? M(ROWH) : cellh(vh);
 	if (lh < u->rowh + 2)
 		lh = (short) (u->rowh + 2);
-	add(u, W_LIST, (short) (wx + pad), ly, (short) (ww - 2 * pad), lh);
+	/* the scrollbar sits INSIDE the list's rectangle, and apj_lay_hit()
+	 * answers with the first match - so it has to go in first */
 	add(u, W_SCROLL, (short) (wx + ww - pad - M(4) - M(SCROLLW)),
 	    (short) (ly + M(4)), M(SCROLLW), (short) (lh - M(8)));
+	add(u, W_LIST, (short) (wx + pad), ly, (short) (ww - 2 * pad), lh);
 
 	u->visrows = (short) ((lh - (apj_skin_ok() ? M(8) : 0)) / u->rowh);
 	if (u->visrows < 0)
