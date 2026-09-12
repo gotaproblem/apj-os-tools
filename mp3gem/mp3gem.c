@@ -137,8 +137,10 @@ static int scan_wait = 0;           /* ticks since the scan last got an answer *
  * folder back to back instead of one file per two ticks (queue on one,
  * collect on the next). The calls themselves are cheap - the host never
  * blocks in FILELEN. A folder that stops answering (a share that has gone
- * away, a worker that lost a file) is given up after 15 s without an
- * answer rather than holding the status line at "timing" for ever.
+ * away, a worker that lost a file) is given up after a minute without any
+ * answer rather than holding the status line at "timing" for ever - a
+ * minute, because the worker reads the folder in order and a slow file
+ * legitimately makes every file behind it wait.
  */
 static int scan_step(void)
 {
@@ -180,7 +182,7 @@ static int scan_step(void)
         scan_wait = 0;
         ui.ntimed = (short)scanned;
         scan_shown = 0;               /* the status line says how far we are */
-    } else if (pending && ++scan_wait >= 60) {
+    } else if (pending && ++scan_wait >= 240) {   /* a minute with no answer at all */
         for (i = 0; i < ntracks; i++)
             if (tlen[i] < 0)
                 tlen[i] = 0;          /* unknown, and no longer asked for */
@@ -979,7 +981,9 @@ int main(int argc, char *argv[])
     }
 
 out:
-    /* leave the music playing on exit; use Stop or MP3PLAY STOP to silence */
+    /* closing the player is stopping it - a track playing on with nothing
+     * on screen to stop it was the wrong kind of surprise */
+    nf_call(mp3id | NF_MP3_STOP);
     apj_skin_free();
     if (artbuf)
         Mfree(artbuf);
