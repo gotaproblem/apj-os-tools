@@ -1,0 +1,45 @@
+From 1b592316d091741a35b39a8c6b68549a5a2911d6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 12 Sep 2026 16:54:58 +0000
+Subject: [PATCH] MP3PLAY: FILELEN log line removed - it found what it was for
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MGcLwq6U6E1QhD3W3PzuF7
+---
+ platforms/atari/audio/dmasnd_hdmi.c | 20 +-------------------
+ 1 file changed, 1 insertion(+), 19 deletions(-)
+
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index 9bd4501..8b6125c 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -679,25 +679,7 @@ static void *fl_worker(void *arg)
+         strcpy(path, fl[pick].path);
+         pthread_mutex_unlock(&fl_mx);
+ 
+-        {
+-            struct timespec t0, t1;
+-            long ms;
+-            const char *base = strrchr(path, '/');
+-
+-            clock_gettime(CLOCK_MONOTONIC, &t0);
+-            secs = filelen_sync(path);      /* the slow part, no lock held */
+-            clock_gettime(CLOCK_MONOTONIC, &t1);
+-            ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
+-            /* one line per file: what it answered and how long the read
+-             * took - a slow share shows up here as seconds per file, a
+-             * file it cannot open as -1 */
+-            fprintf(stderr, "[MP3] filelen %s -> %ld s (%ld ms)\n",
+-                   base ? base + 1 : path, secs, ms);
+-            /* stdout is a pipe under systemd (the journal), so glibc
+-             * buffers it 4 KB at a time and a line like this would sit
+-             * unseen for hours - kbd_usb.c flushes for the same reason */
+-            fflush(stdout);
+-        }
++        secs = filelen_sync(path);          /* the slow part, no lock held */
+ 
+         pthread_mutex_lock(&fl_mx);
+         if (fl[pick].state == 1 && strcmp(fl[pick].path, path) == 0) {
+-- 
+2.43.0
+
