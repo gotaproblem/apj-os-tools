@@ -491,6 +491,9 @@ static void draw_status(MP3UI *u, short vh)
 
 	ui_font(vh, F_SMALL);
 	y = (short) (u->work.g_y + u->work.g_h - M(PAD) - cellh(vh));
+	apj_fill(vh, (short) (u->work.g_x + M(PAD)), y,
+	         (short) (u->work.g_w - 2 * M(PAD)), cellh(vh),
+	         apj_skin_pen(APJ_R_PANEL));
 
 #if MP3UI_DEBUG
 	sprintf(buf, "%d tracks   t%ld p%ld s%ld", (int) u->ntracks,
@@ -505,6 +508,12 @@ static void draw_status(MP3UI *u, short vh)
 		         apj_skin_pen(APJ_X_MUTED), u->dir);
 }
 
+/*
+ * What the timer repaints. The status line belongs here too: leaving it to
+ * the full redraw meant the track count, the path and the debug counters
+ * sat stale between them - which is exactly what made the clock look
+ * frozen when it was not.
+ */
 void mp3ui_draw_band(MP3UI *u, short vh)
 {
 	if (!apj_skin_ok())
@@ -514,6 +523,8 @@ void mp3ui_draw_band(MP3UI *u, short vh)
 	}
 	draw_seek(u, vh);
 	draw_transport(u, vh);
+	draw_status(u, vh);
+	ui_font(vh, F_BODY);
 }
 
 /*

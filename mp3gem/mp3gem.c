@@ -118,9 +118,11 @@ static void scan_reset(void)
 }
 
 /*
- * A few files per timer tick, not all of them at once. mpg123_scan() on a
- * VBR file is not free and 22 of them in a row is a visible stall before
- * the window even appears. Returns 1 if the list should be redrawn.
+ * One file per timer tick. Even one can cost a full mpg123_scan() on a VBR
+ * file without a Xing header, and that runs inside the event loop - two of
+ * them per 250 ms tick made the pointer stutter. Sub-op 11 avoids the scan
+ * whenever the header already knows the length. Returns 1 if the list
+ * should be redrawn.
  */
 static int scan_step(void)
 {
@@ -129,7 +131,7 @@ static int scan_step(void)
 
     if (!have_filelen)
         return 0;
-    while (scanned < ntracks && done < 2) {
+    while (scanned < ntracks && done < 1) {   /* one per tick: see below */
         const char *nm = list[scanned];
         long v;
 
