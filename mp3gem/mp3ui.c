@@ -270,6 +270,17 @@ static void draw_seek(MP3UI *u, short vh)
 	if (!l)
 		return;
 	ty = (short) (l->y + (l->h - th) / 2);
+
+	/*
+	 * The whole strip first. This runs on every timer tick, the text is
+	 * drawn transparently and the knob is taller than the track, so
+	 * without an erase the digits pile up on each other and the knob
+	 * leaves crumbs behind it.
+	 */
+	apj_fill(vh, (short) (u->work.g_x + M(PAD)), l->y,
+	         (short) (u->work.g_w - 2 * M(PAD)), l->h,
+	         apj_skin_pen(APJ_R_PANEL));
+
 	apj_skin_9(vh, APJ_RG_SEEK, APJ_SK_TRACK, l->x, ty, l->w, th);
 	fw = 0;
 	if (u->len_s > 0)
@@ -433,11 +444,16 @@ static void draw_list(MP3UI *u, short vh)
 		         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), nm);
 		if (u->len_of)
 		{
-			hhmmss(tbuf, u->len_of(u->ctx, i));
-			apj_skin_text(vh,
-			         (short) (l->x + l->w - M(12) - cw * (short) strlen(tbuf)),
-			         (short) (iy + (u->rowh - ch) / 2),
-			         apj_skin_pen(APJ_X_MUTED), tbuf);
+			long secs = u->len_of(u->ctx, i);
+
+			if (secs > 0)
+			{
+				hhmmss(tbuf, secs);
+				apj_skin_text(vh,
+				         (short) (l->x + l->w - M(12) - cw * (short) strlen(tbuf)),
+				         (short) (iy + (u->rowh - ch) / 2),
+				         apj_skin_pen(APJ_X_MUTED), tbuf);
+			}
 		}
 		iy = (short) (iy + u->rowh);
 	}

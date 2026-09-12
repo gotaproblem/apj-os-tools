@@ -49,6 +49,7 @@ extern long nf_call(long id, ...);
 #define NF_MP3_INFO   8      /* 0 bitrate kbps, 1 channels, 2 layer, 3 VBR   */
 #define NF_MP3_ART    9      /* ptr, size, edge -> bytes written, 0 = no art */
 #define NF_MP3_VOLUME 10     /* -1 query, 0..100 set                          */
+#define NF_MP3_FILELEN 11    /* p0 path -> length in seconds, -1 unknown      */
 
 /* ---------------------------------------------------------------- state -- */
 
@@ -64,7 +65,9 @@ static int   iconified = 0;
 
 static char  dir[256]  = "";              /* playlist directory (GEMDOS path) */
 static char  list[MAXTRACKS][NAMELEN];
+static long  tlen[MAXTRACKS];             /* seconds, 0 = not known */
 static int   ntracks = 0;
+static int   have_filelen = 1;            /* cleared if the host has no sub-op 11 */
 
 static char  ui_title[128] = "PiSTorm MP3";
 static char  ui_sub[192]   = "Open a file...";
@@ -89,6 +92,45 @@ static const char *name_of(void *c, short i)
 {
     (void)c;
     return (i >= 0 && i < ntracks) ? list[i] : "";
+}
+
+static long len_of(void *c, short i)
+{
+    (void)c;
+    return (i >= 0 && i < ntracks) ? tlen[i] : 0L;
+}
+
+/*
+ * Track durations for the playlist. MP3PLAY only knows the length of the
+ * track it has open, so the host scans each file once (sub-op 11) and we
+ * cache the answer. A CBR file is a header read; a VBR one costs a scan,
+ * which is why this happens on load behind a busy bee rather than during
+ * a redraw.
+ */
+static void scan_lengths(void)
+{
+    char path[400];
+    int i;
+
+    for (i = 0; i < MAXTRACKS; i++)
+        tlen[i] = 0;
+    if (!have_filelen || !ntracks)
+        return;
+
+    graf_mouse(BUSYBEE, NULL);
+    for (i = 0; i < ntracks; i++) {
+        const char *nm = list[i];
+        long v;
+
+        snprintf(path, sizeof(path), "%s\\%s", dir, nm);
+        v = nf_call(mp3id | NF_MP3_FILELEN, path);
+        if (v < 0) {                  /* an older emulator: stop asking */
+            have_filelen = 0;
+            break;
+        }
+        tlen[i] = v;
+    }
+    graf_mouse(ARROW, NULL);
 }
 
 /*
@@ -286,6 +328,7 @@ static int load_dir(const char *d)
     ui.ntracks = (short)ntracks;
     ui.top = 0;
     ui.sel = ntracks ? 0 : -1;
+    scan_lengths();
     return ntracks;
 }
 
@@ -493,6 +536,7 @@ int main(int argc, char *argv[])
     ui.title = ui_title;
     ui.sub = ui_sub;
     ui.name_of = name_of;
+    ui.len_of = len_of;
     ui.sel = -1;
     ui.hover = -1;
     ui.press = -1;
