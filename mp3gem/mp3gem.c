@@ -128,6 +128,7 @@ static void scan_reset(void)
  * Returns 1 if a visible row got its duration and the list should redraw.
  */
 static int scan_shown = 1;          /* status line reflects ui.ntimed */
+static int scan_wait = 0;           /* ticks the current file has been pending */
 
 static int scan_step(void)
 {
@@ -140,8 +141,15 @@ static int scan_step(void)
     nm = list[scanned];
     snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
     v = nf_call(mp3id | NF_MP3_FILELEN, path);
-    if (v == -2)                      /* still reading: same file next tick */
-        return 0;
+    if (v == -2) {                    /* still reading: same file next tick */
+        /* ... but not for ever. A file the host never answers for (a full
+         * scan over a slow share, or a worker that has lost it) must not
+         * hold up the twenty behind it: after 15 s call it unknown. */
+        if (++scan_wait < 60)
+            return 0;
+        v = 0;
+    }
+    scan_wait = 0;
     if (v < 0) {                      /* an older emulator: stop asking */
         have_filelen = 0;
         scanned = ntracks;
@@ -495,6 +503,7 @@ static int load_dir(const char *d)
     ui.ntracks = (short)ntracks;
     ui.ntimed = have_filelen ? 0 : -1;
     scan_shown = 0;
+    scan_wait = 0;
     ui.top = 0;
     ui.sel = ntracks ? 0 : -1;
     scan_reset();

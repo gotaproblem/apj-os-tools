@@ -541,6 +541,7 @@ static void draw_list(MP3UI *u, short vh)
 {
 	const APJ_LAY *l = apj_lay_find(u->lay, u->nlay, W_LIST);
 	short r, iy, ch, cw, g = apj_skin_glyphsz();
+	short numx, namex;
 	char tbuf[16];
 
 	ui_font(vh, F_BODY);
@@ -549,6 +550,13 @@ static void draw_list(MP3UI *u, short vh)
 	if (!l || !vis(u, l->x, l->y, l->w, l->h))
 		return;
 	apj_skin_9(vh, APJ_RG_GROUP, 0, l->x, l->y, l->w, l->h);
+
+	/* the number column starts where the play mark sits; the name a
+	 * cell after the widest number - never closer than the sheet's 34 */
+	numx = M(12);
+	namex = (short) (numx + cw * 3);
+	if (namex < M(34))
+		namex = M(34);
 
 	iy = (short) (l->y + M(4));
 	for (r = 0; r < u->visrows; r++)
@@ -579,18 +587,22 @@ static void draw_list(MP3UI *u, short vh)
 		}
 		else
 		{
+			/* the row number, right-aligned in a two-digit column, a
+			 * whole cell clear of the name: file names mostly begin with
+			 * a track number of their own, and "11" against "11 Hoedown"
+			 * read as one number at 100% */
 			sprintf(tbuf, "%d", (int) (i + 1));
-			apj_skin_text(vh, (short) (l->x + M(12)),
+			apj_skin_text(vh, (short) (l->x + numx + cw * (2 - (short) strlen(tbuf))),
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(APJ_X_MUTED), tbuf);
 		}
 		{
 			char clip[96];
-			short avail = (short) (l->w - M(34) - M(12) - cw * 6 - M(8) -
+			short avail = (short) (l->w - namex - M(12) - cw * 6 - M(8) -
 			                       (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(6) : 0));
 
 			fit_text(vh, clip, (short) sizeof(clip), nm, avail);
-			apj_skin_text(vh, (short) (l->x + M(34)),
+			apj_skin_text(vh, (short) (l->x + namex),
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), clip);
 		}

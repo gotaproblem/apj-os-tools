@@ -1,0 +1,54 @@
+From 3e81fc08f5f9f77a7b245fb512810975a73d44a5 Mon Sep 17 00:00:00 2001
+From: "Claude Fable 5.1" <noreply@anthropic.com>
+Date: Sat, 12 Sep 2026 14:07:45 +0000
+Subject: [PATCH] MP3PLAY: FILELEN logs each file it reads
+
+One console line per file - what it answered and how long the read
+took - so a playlist whose times stop arriving can be told apart:
+seconds per file is the share, -1 is a file it could not open, and a
+file that never appears is one the worker never got to.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MGcLwq6U6E1QhD3W3PzuF7
+---
+ platforms/atari/audio/dmasnd_hdmi.c | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index e000539..ddfcaf0 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -602,6 +602,7 @@ static long filelen_sync(const char *host_path)
+  * the next time round. A small cache means a folder is only read once.
+  */
+ #include <pthread.h>
++#include <time.h>
+ 
+ #define FL_SLOTS 64
+ #define FL_PATH  528                        /* HOSTFS_HOST_PATH_MAX + 16 */
+@@ -637,7 +638,21 @@ static void *fl_worker(void *arg)
+         strcpy(path, fl[pick].path);
+         pthread_mutex_unlock(&fl_mx);
+ 
+-        secs = filelen_sync(path);          /* the slow part, no lock held */
++        {
++            struct timespec t0, t1;
++            long ms;
++            const char *base = strrchr(path, '/');
++
++            clock_gettime(CLOCK_MONOTONIC, &t0);
++            secs = filelen_sync(path);      /* the slow part, no lock held */
++            clock_gettime(CLOCK_MONOTONIC, &t1);
++            ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
++            /* one line per file: what it answered and how long the read
++             * took - a slow share shows up here as seconds per file, a
++             * file it cannot open as -1 */
++            printf("[MP3] filelen %s -> %ld s (%ld ms)\n",
++                   base ? base + 1 : path, secs, ms);
++        }
+ 
+         pthread_mutex_lock(&fl_mx);
+         if (fl[pick].state == 1 && strcmp(fl[pick].path, path) == 0) {
+-- 
+2.43.0
+
