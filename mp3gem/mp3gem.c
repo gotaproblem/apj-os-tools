@@ -75,6 +75,7 @@ static char  ui_sub[192]   = "Open a file...";
 static char  ui_codec[32]  = "";
 
 static MP3UI ui;
+static short vol_before_mute = 100;
 static void *artbuf = NULL;         /* cover tile, TT-RAM, device format */
 static long  artcap = 0;
 static GRECT m1r;
@@ -278,10 +279,47 @@ static void redraw(void (*fn)(void), short rx, short ry, short rw, short rh)
     wind_update(END_UPDATE);
 }
 
+/*
+ * The playlist scrolls through the window's vertical slider. The AES draws
+ * it in the theme, in the frame column it reserves on the right anyway,
+ * and turns the mouse wheel into WM_ARROWED for free.
+ */
+static void set_slider(void)
+{
+    long span = (long)ui.ntracks - ui.visrows;
+    short size, pos;
+
+    if (ui.ntracks <= 0 || ui.visrows <= 0 || span <= 0) {
+        size = 1000;
+        pos = 0;
+    } else {
+        size = (short)(1000L * ui.visrows / ui.ntracks);
+        if (size < 20) size = 20;
+        pos = (short)(1000L * ui.top / span);
+    }
+    wind_set(win, WF_VSLSIZE, size, 0, 0, 0);
+    wind_set(win, WF_VSLIDE, pos, 0, 0, 0);
+}
+
+static void set_top(long t)
+{
+    long max = (long)ui.ntracks - ui.visrows;
+
+    if (max < 0) max = 0;
+    if (t > max) t = max;
+    if (t < 0)   t = 0;
+    if ((short)t != ui.top) {
+        ui.top = (short)t;
+        redraw(draw_all, wx, wy, ww, wh);
+    }
+    set_slider();
+}
+
 static void relayout(void)
 {
     wind_get(win, WF_WORKXYWH, &wx, &wy, &ww, &wh);
     mp3ui_layout(&ui, vh, wx, wy, ww, wh);
+    set_top(ui.top);                  /* clamps, and refreshes the slider */
 }
 
 /*
@@ -361,6 +399,7 @@ static void scroll_to(short i)
         ui.top = i;
     if (ui.visrows > 0 && i >= ui.top + ui.visrows)
         ui.top = (short)(i - ui.visrows + 1);
+    set_slider();
 }
 
 static void open_in_dir(const char *path, const char *fname)
@@ -480,9 +519,14 @@ static void do_widget(short id, short mx)
         do_open();
         redraw(draw_all, wx, wy, ww, wh);
         break;
-    case W_VOLICO:
-        if (ui.hasvol)
-            set_volume(ui.vol ? 0 : 100);
+    case W_VOLICO:                    /* mute toggles, and remembers */
+        if (ui.hasvol) {
+            if (ui.vol) {
+                vol_before_mute = ui.vol;
+                set_volume(0);
+            } else
+                set_volume(vol_before_mute > 0 ? vol_before_mute : 100);
+        }
         break;
     case W_VOL:
         l = apj_lay_find(ui.lay, ui.nlay, W_VOL);
@@ -525,6 +569,9 @@ static void click(short mx, short my)
 }
 
 /* ---------------------------------------------------------------- main --- */
+
+#define WIN_KIND    (NAME | CLOSER | MOVER | SIZER | SMALLER | \
+                     VSLIDE | UPARROW | DNARROW)
 
 #define VA_START    0x4711     /* AV protocol: open these files */
 #define AV_STARTED  0x4738
@@ -579,10 +626,9 @@ int main(int argc, char *argv[])
         wind_get(0, WF_WORKXYWH, &dx, &dy, &dw, &dh);
         if (want_w > dw) want_w = dw;
         if (want_h > dh) want_h = dh;
-        wind_calc(WC_BORDER, NAME | CLOSER | MOVER | SIZER | SMALLER,
+        wind_calc(WC_BORDER, WIN_KIND,
                   dx + 16, dy + 16, want_w, want_h, &cx, &cy, &cwid, &chgt);
-        win = wind_create(NAME | CLOSER | MOVER | SIZER | SMALLER,
-                          cx, cy, cwid, chgt);
+        win = wind_create(WIN_KIND, cx, cy, cwid, chgt);
         wind_set_str(win, WF_NAME, "PiSTorm MP3");
         wind_open(win, cx, cy, cwid, chgt);
         relayout();
@@ -617,6 +663,20 @@ int main(int argc, char *argv[])
                     if (msg[0] == WM_SIZED)
                         redraw(draw_all, wx, wy, ww, wh);
                     break;
+                case WM_ARROWED:      /* arrows, page clicks, mouse wheel */
+                    switch (msg[4]) {
+                        case WA_UPLINE: set_top(ui.top - 1); break;
+                        case WA_DNLINE: set_top(ui.top + 1); break;
+                        case WA_UPPAGE: set_top(ui.top - ui.visrows); break;
+                        case WA_DNPAGE: set_top(ui.top + ui.visrows); break;
+                    }
+                    break;
+                case WM_VSLID: {
+                    long span = (long)ui.ntracks - ui.visrows;
+                    if (span > 0)
+                        set_top((span * msg[4] + 500L) / 1000L);
+                    break;
+                }
                 case WM_CLOSED:
                     goto out;
                 case WM_ICONIFY:
