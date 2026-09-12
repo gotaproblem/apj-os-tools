@@ -78,7 +78,7 @@ static MP3UI ui;
 static void *artbuf = NULL;         /* cover tile, TT-RAM, device format */
 static long  artcap = 0;
 static GRECT m1r;
-static short m1flag = 1;
+static short m1flag = MO_ENTER;
 
 /* ------------------------------------------------------------- NF glue --- */
 
@@ -288,6 +288,13 @@ static void relayout(void)
  * Hover. MU_M1 gives one rectangle: while the pointer is over a widget we
  * ask to hear about it LEAVING that widget, and while it is not we ask to
  * hear about it ENTERING the strip. That is the whole hover machine.
+ *
+ * The flag is MO_ENTER (0) / MO_LEAVE (1). Getting those two the wrong way
+ * round asks the AES for a condition that is already true, it answers at
+ * once, and evnt_multi() spins without ever letting the timer elapse -
+ * but only while this window is on top, since rectangle events are not
+ * delivered to anyone else. Which is precisely the "clock runs only when
+ * the player is unfocused" that took most of a morning to find.
  */
 static void arm_m1(void)
 {
@@ -296,10 +303,10 @@ static void arm_m1(void)
 
     if (l) {
         m1r.g_x = l->x; m1r.g_y = l->y; m1r.g_w = l->w; m1r.g_h = l->h;
-        m1flag = 0;                       /* tell me when it leaves */
+        m1flag = MO_LEAVE;
     } else {
         mp3ui_bbox(&ui, &m1r);
-        m1flag = 1;                       /* tell me when it enters */
+        m1flag = MO_ENTER;
     }
 }
 

@@ -21,6 +21,8 @@ typedef struct
 } MFDB;
 
 #define S_ONLY		3
+#define MO_ENTER	0
+#define MO_LEAVE	1
 #define MD_REPLACE	1
 #define MD_TRANS	2
 #define FIS_SOLID	1
