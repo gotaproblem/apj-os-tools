@@ -122,7 +122,7 @@ static void scan_lengths(void)
         const char *nm = list[i];
         long v;
 
-        snprintf(path, sizeof(path), "%s\\%s", dir, nm);
+        snprintf(path, sizeof(path), "%.255s\\%.63s", dir, nm);
         v = nf_call(mp3id | NF_MP3_FILELEN, path);
         if (v < 0) {                  /* an older emulator: stop asking */
             have_filelen = 0;
@@ -205,7 +205,7 @@ static void start_track(int i)
 
     if (i < 0 || i >= ntracks)
         return;
-    snprintf(path, sizeof(path), "%s\\%s", dir, list[i]);
+    snprintf(path, sizeof(path), "%.255s\\%.63s", dir, list[i]);
     if (nf_call(mp3id | NF_MP3_PLAY, path) == 0) {
         ui.sel = (short)i;
         ui.playing = 1;
