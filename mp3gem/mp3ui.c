@@ -20,7 +20,7 @@
 #define ROWH		24
 #define STATH		14
 #define BADGEH		16
-#define SCROLLW		10	/* skin metric scroll_w */
+#define SCROLLW		6	/* skin metric scroll_w - XaAES's thumb width */
 
 #define M(pt)		apj_skin_m(pt)
 

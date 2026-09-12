@@ -280,12 +280,13 @@ def build(skin, scale, gnames, gfiles):
             atiles.append(a.finish())
     parts[RG_TILEACC] = atiles
 
-    # --- 11 VSCROLL: the playlist scrollbar, a vertical pill on the list
-    # ground - trough, thumb, thumb while dragged
+    # --- 11 VSCROLL: the playlist scrollbar. The same recipe as XaAES's
+    # Fluent window slider (win_draw.c apj_thumb): flat track the colour
+    # of the ground, a thin mid-grey (DISABLED) thumb, darker while held.
     vw = M["scroll_w"]
     vh_ = vw * 3 + 2
     vs = []
-    for col in (C["ROW"], C["MUTED"], C["ACCENT"]):
+    for col in (C["PAPER"], C["DISABLED"], C["MUTED"]):
         a = Art(vw, vh_, C["PAPER"])
         a.rrect(0, 0, vw, vh_, vw // 2, fill=col)
         vs.append(a.finish())
@@ -309,8 +310,8 @@ def build(skin, scale, gnames, gfiles):
         RG_BTNACC:   ([(P, P)] * 4, 0),
         RG_TILE:     ([(P, P)] * (NBTNGLYPH * NSTATE), 0),
         RG_TILEACC:  ([(P, P)] * (NACCGLYPH * NSTATE), 0),
-        RG_VSCROLL:  ([(C["ROW"], C["ROW"]), (C["MUTED"], C["MUTED"]),
-                       (C["ACCENT"], C["ACCENT"])], 0),
+        RG_VSCROLL:  ([(C["PAPER"], C["PAPER"]), (C["DISABLED"], C["DISABLED"]),
+                       (C["MUTED"], C["MUTED"])], 0),
     }
 
     # ------------------------------------------------------------ layout --

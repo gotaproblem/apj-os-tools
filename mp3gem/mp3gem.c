@@ -753,8 +753,21 @@ int main(int argc, char *argv[])
         if ((ev & MU_BUTTON) && !iconified)
             click(mx, my);
         if (ev & MU_KEYBD) {
-            char c = (char)(kr & 0xff);
-            if (c == ' ')                  do_widget(W_PLAY, 0);
+            char  c    = (char)(kr & 0xff);
+            short scan = (short)((kr >> 8) & 0xff);
+
+            /*
+             * The mouse wheel arrives HERE, not as a wheel event: the
+             * PiStorm's USB bridge (kbd_usb.c) turns each wheel click into
+             * a cursor Up/Down key tap. XaAES never sees a wheel at all,
+             * so WF_WHEEL has nothing to deliver. Arrow keys scroll the
+             * list one row; PgUp/PgDn a page.
+             */
+            if      (scan == 0x48) set_top(ui.top - 1);
+            else if (scan == 0x50) set_top(ui.top + 1);
+            else if (scan == 0x49) set_top(ui.top - ui.visrows);
+            else if (scan == 0x51) set_top(ui.top + ui.visrows);
+            else if (c == ' ')             do_widget(W_PLAY, 0);
             else if (c == 'n' || c == 'N') do_widget(W_NEXT, 0);
             else if (c == 'p' || c == 'P') do_widget(W_PREV, 0);
             else if (c == 'q' || c == 'Q' || c == 0x1b) goto out;
