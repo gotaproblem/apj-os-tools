@@ -672,6 +672,8 @@ static void draw_status(MP3UI *u, short vh)
 #else
 	if (u->ntimed >= 0 && u->ntimed < u->ntracks)
 		sprintf(buf, "%d tracks, timing %d", (int) u->ntracks, (int) u->ntimed);
+	else if (u->nbad > 0)
+		sprintf(buf, "%d tracks, %d unreadable", (int) u->ntracks, (int) u->nbad);
 	else
 		sprintf(buf, "%d tracks", (int) u->ntracks);
 #endif

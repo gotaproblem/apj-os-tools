@@ -47,6 +47,7 @@ typedef struct
 	/* playlist */
 	short  ntracks, sel, top;
 	short  ntimed;			/* tracks with a length so far; -1 = not scanning */
+	short  nbad;			/* of those, files the host could not read */
 	const char *(*name_of)(void *ctx, short i);
 	long        (*len_of )(void *ctx, short i);
 	void  *ctx;

@@ -165,12 +165,14 @@ static int scan_step(void)
             pending++;
             continue;
         }
-        if (v < 0) {                  /* an older emulator: stop asking */
-            have_filelen = 0;
-            scan_done = 1;
-            ui.ntimed = -1;
-            scan_shown = 0;
-            return 0;
+        if (v < 0) {
+            /* -1: the host could not read THIS file (or is too old to
+             * have sub-op 11 at all, in which case every file says so).
+             * It used to abort the whole scan, and with every file asked
+             * at once one bad answer blanked the entire list. Count it
+             * and carry on. */
+            v = 0;
+            ui.nbad++;
         }
         tlen[i] = v;
         scanned++;
@@ -533,6 +535,7 @@ static int load_dir(const char *d)
     qsort(list, ntracks, NAMELEN, cmpname);
     ui.ntracks = (short)ntracks;
     ui.ntimed = have_filelen ? 0 : -1;
+    ui.nbad = 0;
     scan_shown = 0;
     scan_wait = 0;
     scan_done = !have_filelen;
