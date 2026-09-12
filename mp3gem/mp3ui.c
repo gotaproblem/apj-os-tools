@@ -67,6 +67,35 @@ static void ui_font(short vh, short kind)
 	vst_point(vh, ladder[kind][col], &d, &d, &d, &d);
 }
 
+/*
+ * Fit s into avail pixels of the current font: copy it to out, and if it
+ * is too long cut it and end it with "...". outsz includes the NUL.
+ */
+static void fit_text(short vh, char *out, short outsz, const char *s, short avail)
+{
+	short cw, max, len;
+	short a[10];
+
+	vqt_attributes(vh, a);
+	cw = a[8] > 0 ? a[8] : 8;
+	max = (short) (avail / cw);
+	if (max > outsz - 1)
+		max = (short) (outsz - 1);
+	len = (short) strlen(s);
+	if (len <= max)
+	{
+		strcpy(out, s);
+		return;
+	}
+	if (max < 4)
+	{
+		out[0] = '\0';
+		return;
+	}
+	memcpy(out, s, (size_t) (max - 3));
+	strcpy(out + max - 3, "...");
+}
+
 static short cellw(short vh)
 {
 	short a[10];
@@ -424,14 +453,20 @@ static void draw_now(MP3UI *u, short vh)
 
 	ix = (short) (l->x + l->w + M(GAPX));
 
-	ui_font(vh, F_TITLE);
-	apj_skin_text(vh, ix, (short) (l->y + M(4)), apj_skin_pen(APJ_R_TEXT),
-	         u->title ? u->title : "");
-	by = (short) (l->y + M(4) + cellh(vh) + M(4));
+	{
+		char fit[160];
+		short avail = (short) (u->work.g_x + u->work.g_w - M(PAD) - ix);
 
-	ui_font(vh, F_BODY);
-	apj_skin_text(vh, ix, by, apj_skin_pen(APJ_X_MUTED), u->sub ? u->sub : "");
-	by = (short) (by + cellh(vh) + M(10));
+		ui_font(vh, F_TITLE);
+		fit_text(vh, fit, (short) sizeof(fit), u->title ? u->title : "", avail);
+		apj_skin_text(vh, ix, (short) (l->y + M(4)), apj_skin_pen(APJ_R_TEXT), fit);
+		by = (short) (l->y + M(4) + cellh(vh) + M(4));
+
+		ui_font(vh, F_BODY);
+		fit_text(vh, fit, (short) sizeof(fit), u->sub ? u->sub : "", avail);
+		apj_skin_text(vh, ix, by, apj_skin_pen(APJ_X_MUTED), fit);
+		by = (short) (by + cellh(vh) + M(10));
+	}
 
 	ui_font(vh, F_SMALL);
 	cw = cellw(vh);
@@ -517,19 +552,8 @@ static void draw_list(MP3UI *u, short vh)
 			char clip[96];
 			short avail = (short) (l->w - M(34) - M(58) -
 			                       (mp3ui_scroll_needed(u) ? M(SCROLLW) + M(6) : 0));
-			short max = (short) (cw > 0 ? avail / cw : 0);
 
-			if (max > (short) sizeof(clip) - 1)
-				max = (short) sizeof(clip) - 1;
-			if (max < 4)
-				max = 4;
-			if ((short) strlen(nm) > max)
-			{
-				memcpy(clip, nm, (size_t) max - 3);
-				strcpy(clip + max - 3, "...");
-			}
-			else
-				strcpy(clip, nm);
+			fit_text(vh, clip, (short) sizeof(clip), nm, avail);
 			apj_skin_text(vh, (short) (l->x + M(34)),
 			         (short) (iy + (u->rowh - ch) / 2),
 			         apj_skin_pen(sel ? APJ_R_SELFG : APJ_R_TEXT), clip);
