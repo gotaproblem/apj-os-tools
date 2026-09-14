@@ -1,5 +1,5 @@
 /*
- * vidplay.c - PiStorm host VIDEO player front-end (TOS .ttp)
+ * vidplay.c - PiSTorm host VIDEO player front-end (TOS .ttp)
  *
  * Calls the "VIDPLAY" NatFeat exposed by the emulator. The Pi demuxes and
  * decodes the file in-process (libavformat/libavcodec), puts the picture on its
@@ -28,7 +28,7 @@
 #include <string.h>
 #include <osbind.h>
 
-/* ---- NatFeat call stubs (ARAnyM/PiStorm ABI) -----------------------------
+/* ---- NatFeat call stubs (ARAnyM/PiSTorm ABI) -----------------------------
  * 0x7300 = NF_GETID (name ptr at 4(sp) -> id in d0)
  * 0x7301 = NF_CALL  (id at 4(sp), args after -> result in d0)
  * Emitted naked so the opcode traps on the caller's stack frame. On real
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
 
     id = nf_id("VIDPLAY");
     if (!id) {
-        fputs("VIDPLAY NatFeat not available (not running under PiStorm?)\r\n",
+        fputs("VIDPLAY NatFeat not available (not running under PiSTorm?)\r\n",
               stderr);
         return 1;
     }

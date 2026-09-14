@@ -1,0 +1,94 @@
+From 6b5b85356a05b192e3725498d994b92a6ec1f648 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 10:52:21 +0000
+Subject: [PATCH] JIT: SMC visits every page of a multi-page write, and a
+ switch back
+
+Follow-up to 0019. pistorm_smc() looked at the first and last page of a
+write, which was enough when the answer was a whole-cache flush - that
+covered whatever lay between. Demoting only the pages it looked at is
+not: the blitter-shadow refresh and fVDI's offscreen rows hand it ranges
+of several KB, and a program image landing over old code through one of
+those kept stale translations on the middle pages. Now it walks every
+page the write touches; for an ordinary store that is one page, two at
+a boundary.
+
+PISTORM_SMC_TARGETED=0 restores the pre-0019 behaviour exactly - lazy
+flush of the whole cache on every hit, marks never cleared - so a boot
+or runtime regression can be pinned on the targeted path in one reboot.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LS8WBqTFcMJfiNnCgYuzbm
+---
+ pistorm_natmem.cpp | 51 ++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 40 insertions(+), 11 deletions(-)
+
+diff --git a/pistorm_natmem.cpp b/pistorm_natmem.cpp
+index c788045..1de1ad8 100755
+--- a/pistorm_natmem.cpp
++++ b/pistorm_natmem.cpp
+@@ -1205,21 +1205,50 @@ static void pistorm_smc_page(uae_u32 pg)
+     code_page[pg] = 0;
+ }
+ 
++/* PISTORM_SMC_TARGETED=0 restores the whole-cache lazy flush on every hit,
++ * marks never cleared - the behaviour before patch 0019 - so a regression
++ * can be pinned on the targeted path in one reboot. Default on. */
++static int smc_targeted(void)
++{
++    static int v = -1;
++    if (v < 0) {
++        const char *e = getenv("PISTORM_SMC_TARGETED");
++        v = !(e && *e == '0');
++        fprintf(stderr, "[SMC] ST-RAM code-page writes: %s\n",
++                v ? "demote that page's blocks (targeted)"
++                  : "lazy-flush the whole cache (PISTORM_SMC_TARGETED=0)");
++    }
++    return v;
++}
++
++/*
++ * EVERY page the write touches, not the first and last. The old code
++ * looked at two pages because its answer - a flush of the whole cache -
++ * covered whatever lay between them. A targeted answer has to visit each
++ * page: the blitter-shadow refresh and fVDI's offscreen rows hand this
++ * ranges of several KB, and a program image landing over old code by one
++ * of those must not keep a stale translation on a middle page.
++ */
+ static inline void pistorm_smc(uaecptr addr, int sz)
+ {
+-    uae_u32 first_page, last_page;
++    uae_u32 pg, last;
+ 
+-    if (addr >= GUEST_RESERVE)
++    if (addr >= GUEST_RESERVE || sz <= 0)
+         return;
+-
+-    first_page = addr >> PAGE_SHIFT;
+-    if (code_page[first_page])
+-        pistorm_smc_page(first_page);
+-
+-    last_page = (addr + sz - 1) >> PAGE_SHIFT;
+-    if (last_page != first_page && last_page < (GUEST_RESERVE >> PAGE_SHIFT)
+-        && code_page[last_page])
+-        pistorm_smc_page(last_page);
++    pg = addr >> PAGE_SHIFT;
++    last = (addr + (uae_u32)sz - 1) >> PAGE_SHIFT;
++    if (last >= (GUEST_RESERVE >> PAGE_SHIFT))
++        last = (GUEST_RESERVE >> PAGE_SHIFT) - 1;
++
++    for (; pg <= last; pg++) {
++        if (!code_page[pg])
++            continue;
++        if (!smc_targeted()) {
++            cache_invalidate();         /* old behaviour: flush all, keep the mark */
++            return;
++        }
++        pistorm_smc_page(pg);
++    }
+ }
+ 
+ extern "C" void pistorm_dma_from_stram(uint32_t addr, uint8_t *dst, uint32_t n)
+-- 
+2.43.0
+

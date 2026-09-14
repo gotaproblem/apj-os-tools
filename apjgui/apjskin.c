@@ -159,9 +159,14 @@ short apj_skin_pen(short role)
 	return (short) (APJ_XPEN_BASE + (role - APJ_R_N));
 }
 
+short apj_skin_has(short rid)
+{
+	return (sk_ok && rid >= 0 && rid < APJ_RG_N && sk_reg[rid].w > 0) ? 1 : 0;
+}
+
 void apj_skin_size(short rid, short *w, short *h)
 {
-	if (!sk_ok || rid < 0 || rid >= APJ_RG_N)
+	if (!apj_skin_has(rid))
 	{
 		*w = *h = 0;
 		return;
@@ -222,7 +227,7 @@ void apj_skin_blit(short vh, short rid, short state, short x, short y)
 {
 	short sx, sy;
 
-	if (!sk_ok || rid < 0 || rid >= APJ_RG_N)
+	if (!apj_skin_has(rid))
 		return;
 	src_of(rid, state, &sx, &sy);
 	copy(vh, sx, sy, sk_reg[rid].w, sk_reg[rid].h, x, y);
@@ -232,7 +237,7 @@ void apj_skin_tilex(short vh, short rid, short state, short x, short y, short w)
 {
 	short sx, sy, sw, i, n;
 
-	if (!sk_ok || rid < 0 || rid >= APJ_RG_N || w <= 0)
+	if (!apj_skin_has(rid) || w <= 0)
 		return;
 	src_of(rid, state, &sx, &sy);
 	sw = sk_reg[rid].w;
@@ -283,7 +288,7 @@ void apj_skin_9(short vh, short rid, short state,
 	struct reg *r;
 	short sx, sy, l, t, rr, b, bw, s, dmw, dmh, fp, bp;
 
-	if (!sk_ok || rid < 0 || rid >= APJ_RG_N || w <= 0 || h <= 0)
+	if (!apj_skin_has(rid) || w <= 0 || h <= 0)
 		return;
 	r = &sk_reg[rid];
 	src_of(rid, state, &sx, &sy);
@@ -490,6 +495,28 @@ const APJ_LAY *apj_lay_find(const APJ_LAY *t, short n, short id)
 
 /* --------------------------------------------------------------- load -- */
 
+/*
+ * What the screen is, and how to make one of its pixels. Exported
+ * because the sheet is not the only thing that gets blitted: the
+ * benchmark's 3D test builds its own frames and has to match, or
+ * vro_cpyfm quietly does nothing (which is exactly what it did).
+ */
+short apj_skin_planes(void)
+{
+	return sk_planes;
+}
+
+long apj_skin_pack(long rgb)
+{
+	short r = (short) ((rgb >> 16) & 0xFF);
+	short g = (short) ((rgb >> 8) & 0xFF);
+	short b = (short) (rgb & 0xFF);
+
+	if (sk_planes == 16)
+		return (long) (((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+	return ((long) r << 16) | ((long) g << 8) | (long) b;	/* 00RRGGBB */
+}
+
 static short screen_planes(short vh)
 {
 	short ext[57];
@@ -637,6 +664,46 @@ static void progdir(char *out, long n)
 		out[0] = '\0';
 }
 
+/* set by apj_skin_setdir(), searched before anything else */
+static char sk_dir[160] = "";
+
+/*
+ * 1 = the app asked for one skin by name; 0 = follow the theme.
+ * sk_pin holds what it asked for, IN FULL: sk_name is sixteen bytes and
+ * holds a four-letter family stem, so a skin loaded by path had its path
+ * truncated there and could never be reloaded. Apps load by stem or by
+ * NULL, so that only ever bit the test harness - but reload has to work
+ * for all three.
+ */
+static short sk_pinned = 0;
+static char  sk_pin[256] = "";
+
+void apj_skin_setdir(const char *dir)
+{
+	if (!dir || !*dir)
+	{
+		sk_dir[0] = '\0';
+		return;
+	}
+	strncpy(sk_dir, dir, sizeof(sk_dir) - 2);
+	sk_dir[sizeof(sk_dir) - 2] = '\0';
+	/* a folder, with or without the trailing backslash */
+	{
+		long n = (long) strlen(sk_dir);
+
+		if (n && sk_dir[n - 1] != '\\' && sk_dir[n - 1] != '/')
+		{
+			sk_dir[n] = '\\';
+			sk_dir[n + 1] = '\0';
+		}
+	}
+}
+
+const char *apj_skin_dir(void)
+{
+	return sk_dir;
+}
+
 static long try_open(const char *dir, const char *file, char *out, short note)
 {
 	long h;
@@ -650,8 +717,19 @@ static long try_open(const char *dir, const char *file, char *out, short note)
 }
 
 /*
- * <stem><scale>.SKN, looked for in the program's own SKINS\ folder, the
- * program folder, SKINS\ and . under the cwd, then the system folder.
+ * <stem><scale>.SKN, looked for in:
+ *
+ *   1  the folder apj_skin_setdir() named, if any (an app's .INF)
+ *   2  the program's own SKINS\ folder, and the program folder
+ *   3  SKINS\ and . under the cwd
+ *   4  S:\APJ-OS\NATFEATS\SKINS\  - where the PiSTorm GEM tools and
+ *      their skins live on the share
+ *   5  C:\OPT\GEM\SKINS\
+ *
+ * 1 and 4 both exist because of accessories. A .PRG sits with the rest of
+ * the tools, so 2 finds the sheets beside it; an .ACC is loaded from the
+ * ROOT of the boot drive, so its progdir is C:\ and 2 finds nothing.
+ *
  * note: record the folders tried in sk_tried for the "No skin" message.
  */
 static long find_skin(const char *stem, short scale, char *path, short note)
@@ -660,18 +738,27 @@ static long find_skin(const char *stem, short scale, char *path, short note)
 	long fh = -1;
 
 	sprintf(file, "%s%d.SKN", stem, (int) scale);
-	progdir(pd, (long) sizeof(pd));
-	if (pd[0])
+
+	if (sk_dir[0])
+		fh = try_open(sk_dir, file, path, note);
+
+	if (fh < 0)
 	{
-		sprintf(sub, "%sSKINS\\", pd);
-		fh = try_open(sub, file, path, note);
-		if (fh < 0)
-			fh = try_open(pd, file, path, note);
+		progdir(pd, (long) sizeof(pd));
+		if (pd[0])
+		{
+			sprintf(sub, "%sSKINS\\", pd);
+			fh = try_open(sub, file, path, note);
+			if (fh < 0)
+				fh = try_open(pd, file, path, note);
+		}
 	}
 	if (fh < 0)
 		fh = try_open("SKINS\\", file, path, note);
 	if (fh < 0)
 		fh = try_open("", file, path, note);
+	if (fh < 0)
+		fh = try_open("S:\\APJ-OS\\NATFEATS\\SKINS\\", file, path, note);
 	if (fh < 0)
 		fh = try_open("C:\\OPT\\GEM\\SKINS\\", file, path, note);
 	return fh;
@@ -725,6 +812,14 @@ short apj_skin_load(short vh, const char *name)
 	apj_skin_free();
 
 	scale = pick_scale(vh);
+	sk_pinned = name ? 1 : 0;
+	if (name)
+	{
+		strncpy(sk_pin, name, sizeof(sk_pin) - 1);
+		sk_pin[sizeof(sk_pin) - 1] = '\0';
+	}
+	else
+		sk_pin[0] = '\0';
 	stem = name ? name : theme_skin(scale);
 	strncpy(sk_name, stem, sizeof(sk_name) - 1);
 	sk_name[sizeof(sk_name) - 1] = '\0';
@@ -747,8 +842,16 @@ short apj_skin_load(short vh, const char *name)
 	if (fh < 0)
 		return 0;
 
+	/*
+	 * Version 2 added the seven PSCTRL regions at the end of the table.
+	 * Both versions load: the region count in the header is what says
+	 * how many are there, and anything past it is marked absent rather
+	 * than making the whole file unreadable. That is what lets a rebuilt
+	 * MP3GEM keep running on a skin set that has not been rebuilt yet.
+	 */
 	if (Fread((short) fh, (long) HEAD_LEN, head) != HEAD_LEN ||
-	    memcmp(head, "APJS", 4) != 0 || be16(head + 4) != 1)
+	    memcmp(head, "APJS", 4) != 0 ||
+	    be16(head + 4) < 1 || be16(head + 4) > 2)
 	{
 		Fclose((short) fh);
 		return 0;
@@ -772,11 +875,14 @@ short apj_skin_load(short vh, const char *name)
 	pixfmt    = (short) be16(head + 44);
 	off_midc  = (long) be32(head + 48);
 
-	if (nreg != APJ_RG_N || pixfmt != 0 || (sk_w & 15) != 0)
+	if (nreg < 1 || nreg > APJ_RG_N || pixfmt != 0 || (sk_w & 15) != 0)
 	{
 		Fclose((short) fh);
 		return 0;
 	}
+	/* regions this sheet does not have read back as zero-sized, and
+	 * every draw call checks that */
+	memset(sk_reg, 0, sizeof(sk_reg));
 
 	Fseek(off_regn, (short) fh, 0);
 	Fread((short) fh, (long) (REG_LEN * nreg), rb);
@@ -911,10 +1017,26 @@ short apj_skin_load(short vh, const char *name)
 	return 1;
 }
 
+/*
+ * Reload after the desktop changed theme.
+ *
+ * This used to keep sk_name and reload THE SAME SHEET, which is not a
+ * reload at all: sk_name holds the stem the last load resolved to, so
+ * following the theme resolved "the theme" exactly once, at startup, and
+ * every APJ_SKINCHG after that re-read the sheet it already had. Only the
+ * pens changed. Switch the desktop from Fluent Dark to Fuji and the app
+ * stayed dark.
+ *
+ * A load with an explicit name is a different thing - an app pinning one
+ * skin, or the test harness passing a path - and that one does have to
+ * come back to the same sheet. Hence the flag rather than a bare NULL.
+ */
 short apj_skin_reload(short vh)
 {
-	char keep[16];
+	char keep[256];
 
-	strcpy(keep, sk_name);
+	if (!sk_pinned)
+		return apj_skin_load(vh, NULL);
+	strcpy(keep, sk_pin);		/* load() overwrites sk_pin - copy first */
 	return apj_skin_load(vh, keep[0] ? keep : NULL);
 }

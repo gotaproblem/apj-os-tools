@@ -919,7 +919,7 @@ int main(int argc, char *argv[])
 
             /*
              * The mouse wheel arrives HERE, not as a wheel event: the
-             * PiStorm's USB bridge (kbd_usb.c) turns each wheel click into
+             * PiSTorm's USB bridge (kbd_usb.c) turns each wheel click into
              * a cursor Up/Down key tap. XaAES never sees a wheel at all,
              * so WF_WHEEL has nothing to deliver. Arrow keys scroll the
              * list one row; PgUp/PgDn a page.

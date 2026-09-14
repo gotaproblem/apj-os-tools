@@ -1,140 +1,95 @@
-# PSMON — PiStorm Monitor
+# PSMON — PiSTorm Monitor
 
-CPU/JIT, memory and task monitor for PiStorm Atari JIT. One source, two
-binaries with deliberately different jobs:
-
-- **`PSMON.PRG`** — for **FreeMiNT**. CPU/JIT figures, memory, and a live task
-  list.
-- **`PSMON.ACC`** — for **GEM desktops, primarily EmuTOS**. CPU/JIT figures and
-  memory only. No task list, and nothing that calls a GEMDOS function EmuTOS
-  does not have.
-
-## Build
+`PSMON.ACC` / `PSMON.PRG`. The live JIT engine figures, guest memory, and
+the state of the Pi underneath, in one skinned window.
 
 ```
-make              # PSMON.PRG and PSMON.ACC
-make clean
+make            # both
+make PSMON.ACC
 ```
 
-Same toolchain assumptions as `vidgem` / `mp3gem`: `MINTBIN=/opt/cross-mint/bin`,
-`CROSS=m68k-atari-mint-`, `-O2 -Wall -m68000`, `-lgem`. Override on the command
-line if yours lives elsewhere.
+Install: `PSMON.ACC` in the **root of the boot drive** (that is where GEM
+loads accessories from), `*.SKN` where the other tools find them.
 
-## Install
+## What it shows
 
-- `PSMON.PRG` — run from the Desktop under FreeMiNT.
-- `PSMON.ACC` — copy to the boot drive root and reboot; appears in the Desk menu.
+The reference is the **taskbar's JIT panel** — TeraDesk `pstask.c`,
+`mn_*`. Same six engine figures, same status indices, same arithmetic:
 
-## The three halves, and what each needs
+| row | from | note |
+|---|---|---|
+| Speed | `PS_JIT_EFF_KHZ` | MHz, and the multiple of an 8 MHz ST |
+| JIT hit | `PS_JIT_HITRATE_X10` | cycle-weighted, tenths of a percent |
+| Idle | `PS_JIT_IDLE_X10` | true STOP-state share of the clock |
+| Cache | `PS_STAT_CACHE_USED` / `_TOTAL`, `_FLUSHES_TOTAL` | |
+| Compile | `PS_STAT_COMPILES` | ×2: the sampler's window is 500 ms |
+| SMC inv | `PS_STAT_SMC_INV` | ×2, same reason |
 
-**Memory — needs nothing.** Totals come from the low-memory system variables
-(`phystop`, `ramtop`, `ramvalid`) read under `Supexec`, free space from GEMDOS.
-Works today against any TOS and any emulator.
+Then the two memory gauges, which need nothing from the emulator: totals
+from the low-memory system variables under `Supexec()`, free space from
+`Mxalloc(-1)` (or `Malloc(-1)` on a TOS that has no `Mxalloc`). If TOS did
+not validate `ramtop`, the emulator's configured TT-RAM size is believed
+instead — "0 free of 128.0 MB" is worth seeing, because it means a TOS
+that is not initialising Fast RAM.
 
-**CPU/JIT — needs the `PSCTRL` NatFeat in the emulator.** That host side is
-applied: `platforms/atari/psctrl.{h,cpp}` plus counters in
-`compemu_support_arm.cpp`, cycle accumulators in `newcpu.cpp`, the 50 Hz
-sampler call in `platform_atari_fdd.c`, and the feature itself in
-`atari_natfeat.cpp`. Rebuild the emulator and Speed, JIT hit rate, cache usage
-and the compile/flush/invalidate counters go live. Run against an emulator
-without it, the app says so in the window and still shows everything else.
+**One block the taskbar has no room for**: the Pi itself — board and RAM,
+ARM clock and SoC temperature, and the firmware throttle bits. That last
+row earns its place. A board that is thermally capped or browning out runs
+the JIT slower, and nothing else on the Atari side can tell you that is
+what happened; "ok now (has throttled)" explains a figure that was worse
+five minutes ago.
 
-**Task list — needs FreeMiNT, and is in the PRG only.** Enumerated from
-`u:\proc` with `Dopendir`/`Dxreaddir`, showing name, PID, memory and run state,
-sorted by memory. Under EmuTOS `Dopendir` answers `EINVFN`, the app notices
-once and stops asking, and the window says there is no task list.
+**What it no longer shows**: the `u:\proc` task list. The XaAES task
+manager does that job properly, and the JIT panel dropped it for the same
+reason.
 
-## Things worth knowing
+## Absent readings
 
-**The task list reads no kernel structures.** Everything comes from the proc
-filesystem's own `XATTR`: `size` is the process's memory use, and `attr` is the
-kernel's `p_attr[]` run-queue encoding —
+Every reading can be absent. The host answers `0xFFFFFFFF` for an index it
+does not know, and an older emulator does not know all of these, so each
+row draws `n/a` rather than a plausible zero.
 
-| attr | state | attr | state |
-|------|-------|------|-------|
-| 0x00 | run | 0x22 | zombie |
-| 0x01 | ready | 0x02 | tsr |
-| 0x20 | wait | 0x24 | stop |
-| 0x21 | io / select | | |
+This is not hypothetical. The **previous** PSMON asked for indices 33..47
+— `MHZ_X100`, `HITRATE_X100`, `SPEEDX_X100` and the rest — most of which
+the emulator has since retired, and it drew a missing index as `0`. A
+stale binary reported a confident `0.00 MHz`.
 
-`Fcntl(PPROCADDR)` would give more, but it hands back a raw pointer into the
-kernel's `PROC` struct whose layout changes between kernel versions. Not worth
-it for a monitor.
+## Flicker
 
-**Speed is MIPS, not MHz, and that is deliberate.** `execute_normal()` charges
-every instruction a flat `4 * CYCLE_UNIT` — the `adjust_cycles()` call above it
-is commented out — and `compile_block()` inherits that same total. So the
-emulator's cycle counter is *exactly* four times an instruction count, and
-dividing it back out gives instructions retired per second with no modelling
-assumption at all. Presenting it as "MHz" or "×ST" would mean asserting a
-cycles-per-instruction figure the emulator does not model: a real 68000
-averages nearer 8–10 once effective-address calculation and memory access are
-counted, so those figures overstate real hardware by roughly 2–2.5×. They are
-still readable at PSCTRL indices 33 and 34 if you want them; they are not on
-screen. For an honest speed multiplier, benchmark — `cdev/coremark` has
-`CM_68000.tos` built, and `jit_glue.cpp` already records a hardware baseline of
-540→734 from `PISTORM_PISSOFF` tuning.
+A monitor is the program most likely to make the rest of the desktop
+flicker, so every rule PSCTRL learned on hardware is built in here from
+the start:
 
-**No per-process CPU%.** The proc filesystem's timestamps are the process
-*start* time, not accumulated CPU. Per-task CPU would mean parsing
-`u:\kern\<pid>\stat`, which only exists if the kern filesystem is mounted.
+* the 500 ms poll compares the **rendered lines**, not the numbers — a
+  figure that moves without changing its string costs nothing;
+* it repaints the **section** whose text changed, not the window;
+* the screen lock (`wind_update`) is taken once per change however many
+  rectangles it covers;
+* `graf_mouse(M_OFF)` repaints whatever is under the pointer — the
+  taskbar, if that is where it is resting — so the pointer is hidden only
+  when it is actually over what is being drawn.
 
-**`Mxalloc` is detected, not version-sniffed.** GEMDOS answers `EINVFN` (-32)
-for calls it does not implement, so the app tries `Mxalloc(-1, 0)` and falls
-back to `Malloc(-1)`. More reliable than reading `os_version`, and
-`Mxalloc(-1, …)` allocates nothing so the probe is free.
+## PSMON.INF
 
-On TOS 1.x that means "free" is the **largest free block**, not the total —
-`Malloc` offers nothing better, and walking the free list would mean allocating
-everything and handing it back, which is far too intrusive for a monitor. The
-window marks it with an asterisk rather than quietly showing a number that
-means something other than it appears to.
+Next to the `.PRG`; for the `.ACC`, in the root of the boot drive, because
+that is where an accessory is loaded from. (`shel_read()` reports the
+*running application's* folder, not the accessory's, which is how PSCTRL's
+INF ended up beside whatever was in the foreground.)
 
-**Redraws are skipped when nothing changed**, by comparing a signature of the
-whole display against the previous sample. Under cooperative GEM, AES time is
-scarce and a VDI redraw is not cheap.
+```
+scale=125
+skins=S:\APJ-OS\NATFEATS\SKINS
+```
 
-**The task list scrolls.** The window is clamped to the desktop at open time,
-and on a 640×400 ST screen that bites, so the PRG carries a real GEM vertical
-slider with arrows — `WM_ARROWED` for line and page steps, `WM_VSLID` for the
-thumb, with proportional `WF_VSLSIZE`. It replaces an earlier "... n more"
-line, which was also a bug: it was drawn over the last task row in the same
-pass and, being shorter than the row beneath it, left the tail of the previous
-text on screen. Every field is blank-padded now, so a short state or name can't
-leave a fragment of a longer one behind either. The ACC has no list and keeps
-the plain window.
+`1` / `2` / `3` set 100% / 125% / 175% and write the file; `0` follows the
+desktop.
 
-**The accessory stalls inside non-AES programs, by design.** Under single-TOS
-GEM an accessory only runs when the foreground application calls the AES; in a
-game that never does, the display freezes. Because the host samples on its own
-wall-clock tick rather than at read time, the first redraw after a stall shows
-*current* values rather than a stale delta — no garbage frame. Under MiNT it is
-preemptive and behaves normally.
+## Testing
 
-**`nf_probe` will not crash a real ST.** `$7300` is an illegal instruction on a
-68000, so the probe installs a temporary vector-4 handler, and if the opcode
-traps it steps the stacked PC past it and reports "unsupported". Worth lifting
-into `vidgem.c` and `mp3gem.c`, which still describe the opcode as "harmless on
-real HW".
-
-## Not done
-
-- **No `PS_SETINT`, so the app is read-only.** No JIT on/off, no manual flush.
-  A NatFeat call runs *inside* a translated block, so anything reaching
-  `flush_icache_hard()` would free the code the call is about to return into.
-  Control needs the deferred-apply hook in `m68k_run_jit()` first —
-  `PSCTRL-DESIGN.md` §4 in the emulator tree.
-- **`WAIT` reads 0% and the row is marked with an asterisk.** The host stubs
-  `wait_x100` to 0 and reports `IDLE_VALID == 0`, so this is the wait-loop
-  heuristic rather than true `regs.stopped` accounting. `TODO-STOP-IDLE.md`
-  explains why that distinction currently matters.
-- **No graph/history.** `PS_STAT_EPOCH` plus the host-side ring buffer were
-  specced so that can be added later with no API change.
-- **No kill or renice.** Deliberate: this is a monitor.
-
-## Status
-
-Compiles clean in both configurations (`-Wall -Wextra`) against the real
-gemlib and MiNTLib headers, and the inline `__asm__` block assembles as m68k
-with the expected encodings. **Not yet run on hardware** — treat the first
-launch as a test.
+`sh tests/psmon/run.sh [file.SKN]` builds `apjskin.c` and `psmonui.c`
+against a fake VDI and a fake 1920×1080 32-bit screen, and draws four
+models: normal, every reading absent, the widest string each row can
+produce, and no emulator at all. It checks the usual blit rules, that no
+**text** leaves the window or its own section box, that no line formats to
+an empty value, and that repainting one section costs under half a full
+window — which is the property that keeps the poll quiet.

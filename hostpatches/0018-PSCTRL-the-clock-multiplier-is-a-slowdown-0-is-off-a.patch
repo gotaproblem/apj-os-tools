@@ -1,0 +1,188 @@
+From f584fd639da453bab4f6293a704086053198af85 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 05:06:16 +0000
+Subject: [PATCH] PSCTRL: the clock multiplier is a slowdown, 0 is off, and it
+ is deferred
+
+Three things wrong with one row.
+
+Its minimum was 1, so the value the emulator boots with - 0 - was outside
+its own slider. 0 is not a missing setting: update_68k_cycles() reads the
+multiplier as 0 = no clock limit, 1..255 = cpucycleunit CYCLE_UNIT * n,
+which is n times SLOWER, and 256 and up as a fixed-point divider the
+emulator never uses. jit_cpu_init() clamps a negative value to 0, so -1
+is 0 spelt differently, not a faster setting. The row now goes 0..8 and
+reads "off (fastest)" / "n x slower", because a bare "3" says the
+opposite of what it does.
+
+It also claimed to apply live and did not: cpucycleunit is derived in
+update_68k_cycles(), which is not called for a poke at currprefs. It goes
+through the deferred queue now and applies at a mode change, like the
+other rows that need the CPU loop to notice.
+
+The six JIT readouts leave the tab - they belong in PSMON, which reads
+the status keys directly.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LS8WBqTFcMJfiNnCgYuzbm
+---
+ platforms/atari/psctrl/psctrl_settings.cpp    | 47 ++++++++++++-------
+ .../atari/psctrl/test_psctrl_settings.cpp     | 45 ++++++++++++++++++
+ 2 files changed, 75 insertions(+), 17 deletions(-)
+
+diff --git a/platforms/atari/psctrl/psctrl_settings.cpp b/platforms/atari/psctrl/psctrl_settings.cpp
+index 0a02bab..a729a98 100644
+--- a/platforms/atari/psctrl/psctrl_settings.cpp
++++ b/platforms/atari/psctrl/psctrl_settings.cpp
+@@ -381,13 +381,31 @@ static int js_speed(const struct ps_item *it, int v)
+   return PS_R_OK;
+ }
+ 
+-static int jg_mult(const struct ps_item *it)   { (void)it; return currprefs.cpu_clock_multiplier; }
++/*
++ * The clock multiplier is a SLOWDOWN, and 0 is off.
++ *
++ * update_68k_cycles() reads it as: 0 leaves cpucycleunit at its default
++ * and the CPU is not clock-limited at all; 1..255 make cpucycleunit
++ * CYCLE_UNIT * n, which is n times SLOWER; 256 and up are a fixed-point
++ * divider (n >> 8), so 512 would be twice as fast - a range this dialog
++ * does not offer and the emulator does not use. jit_cpu_init() also
++ * clamps a negative value to 0, so -1 is not a faster setting, it is 0
++ * spelt differently; and it turns m68k_speed=max into timed scheduling
++ * the moment it is non-zero. So 0 is the fastest setting and it must be
++ * reachable - the row shipped with min 1, which put the default out of
++ * range of its own slider.
++ *
++ * Writing currprefs directly did nothing useful either: cpucycleunit is
++ * derived in update_68k_cycles(), which is not called for a poke. Set
++ * changed_prefs and let the CPU loop apply it at a mode change, which is
++ * what the deferred queue is for.
++ */
++static int jg_mult(const struct ps_item *it)   { (void)it; return changed_prefs.cpu_clock_multiplier; }
+ static int js_mult(const struct ps_item *it, int v)
+ {
+   if (v < it->min || v > it->max)
+     return PS_R_REJECT;
+-  currprefs.cpu_clock_multiplier = changed_prefs.cpu_clock_multiplier = v;
+-  return PS_R_OK;
++  return defer(item_index("cpu_clock_multiplier"), v);
+ }
+ 
+ static const int cache_kb[] = { 0, 2048, 4096, 8192, 16384 };
+@@ -426,12 +444,6 @@ static int js_flush(const struct ps_item *it, int v)
+ }
+ 
+ /* read-only readouts, so the JIT tab is a diagnostic and not just a form */
+-static int ig_hit(const struct ps_item *it)   { (void)it; return (int)psctrl_getint(PS_JIT_HITRATE_X10); }
+-static int ig_idle(const struct ps_item *it)  { (void)it; return (int)psctrl_getint(PS_JIT_IDLE_X10); }
+-static int ig_used(const struct ps_item *it)  { (void)it; return (int)(psctrl_getint(PS_STAT_CACHE_USED) / 1024u); }
+-static int ig_total(const struct ps_item *it) { (void)it; return (int)(psctrl_getint(PS_STAT_CACHE_TOTAL) / 1024u); }
+-static int ig_flush(const struct ps_item *it) { (void)it; return (int)psctrl_getint(PS_STAT_FLUSHES_TOTAL); }
+-static int ig_smc(const struct ps_item *it)   { (void)it; return (int)psctrl_getint(PS_STAT_SMC_INV); }
+ static int ig_temp(const struct ps_item *it)  { (void)it; return (int)(psctrl_getint(PS_HOST_SOC_TEMP_MC) / 1000u); }
+ /* what the emulator is ACTUALLY running, as against what the cfg asks
+  * for - they differ whenever a cfg change has not been restarted into */
+@@ -653,8 +665,8 @@ ITEM("jit_power", "JIT power", PS_TAB_JIT, PS_K_INT, PS_C_LIVE, PS_U_NONE,
+      0, 6, 1, NULL, 0, 0, NULL, jg_power, js_power, NULL),
+ ITEM("m68k_speed", "68k speed", PS_TAB_JIT, PS_K_INT, PS_C_LIVE, PS_U_NONE,
+      -1, 20, 1, NULL, 0, 0, NULL, jg_speed, js_speed, NULL),
+-ITEM("cpu_clock_multiplier", "Clock multiplier", PS_TAB_JIT, PS_K_INT,
+-     PS_C_LIVE, PS_U_NONE, 1, 8, 1, NULL, 0, 0, NULL, jg_mult, js_mult, NULL),
++ITEM("cpu_clock_multiplier", "CPU slowdown", PS_TAB_JIT, PS_K_INT,
++     PS_C_DEFER, PS_U_NONE, 0, 8, 1, NULL, 0, 0, NULL, jg_mult, js_mult, NULL),
+ ITEM("jit_cache", "Translation cache", PS_TAB_JIT, PS_K_ENUM, PS_C_DEFER,
+      PS_U_NONE, 0, 4, 1, L_cache, 5, PS_F_NEWLINE, NULL, jg_cache, js_cache, NULL),
+ ITEM("comp_constjump", "Follow constant jumps", PS_TAB_JIT, PS_K_BOOL,
+@@ -665,12 +677,6 @@ ITEM("compfpu", "Translate FPU", PS_TAB_JIT, PS_K_BOOL, PS_C_DEFER,
+      PS_U_NONE, 0, 1, 1, L_OFFON, 2, 0, NULL, jg_compfpu, js_compfpu, NULL),
+ ITEM("jit_flush", "Flush cache now", PS_TAB_JIT, PS_K_ACTION, PS_C_DEFER,
+      PS_U_NONE, 0, 0, 0, NULL, 0, PS_F_NEWLINE, NULL, jg_zero, js_flush, NULL),
+-RO_INT("jit_hitrate", "JIT hit rate", PS_TAB_JIT, PS_U_PCT10, ig_hit),
+-RO_INT("jit_idle", "Guest idle", PS_TAB_JIT, PS_U_PCT10, ig_idle),
+-RO_INT("jit_cache_used", "Cache used", PS_TAB_JIT, PS_U_KB, ig_used),
+-RO_INT("jit_cache_total", "Cache total", PS_TAB_JIT, PS_U_KB, ig_total),
+-RO_INT("jit_flushes", "Hard flushes", PS_TAB_JIT, PS_U_NONE, ig_flush),
+-RO_INT("jit_smc", "SMC invalidations", PS_TAB_JIT, PS_U_NONE, ig_smc),
+ 
+ /* --------------------------------------------------------- CPU/RAM --- */
+ ITEM("machine", "Machine", PS_TAB_CPU, PS_K_ENUM, PS_C_BOOT, PS_U_NONE,
+@@ -905,6 +911,13 @@ void psctrl_apply_pending(void)
+     } else if (!strcmp(nm, "compfpu")) {
+       changed_prefs.compfpu = v ? true : false;
+       check_prefs_changed_comp(false);
++    } else if (!strcmp(nm, "cpu_clock_multiplier")) {
++      /* changed_prefs already holds it; config_changed is what makes
++       * check_prefs_changed_cpu() look, and the mode change is where
++       * update_68k_cycles() re-derives cpucycleunit */
++      changed_prefs.cpu_clock_multiplier = v;
++      config_changed = 1;
++      check_prefs_changed_cpu();
+     } else if (!strcmp(nm, "jit_flush")) {
+       psctrl_jit_flush_now();
+     }
+diff --git a/platforms/atari/psctrl/test_psctrl_settings.cpp b/platforms/atari/psctrl/test_psctrl_settings.cpp
+index 02272ee..a97a996 100644
+--- a/platforms/atari/psctrl/test_psctrl_settings.cpp
++++ b/platforms/atari/psctrl/test_psctrl_settings.cpp
+@@ -38,6 +38,18 @@
+ 
+ struct uae_prefs currprefs, changed_prefs;
+ int pissoff_value = 0;
++int config_changed = 0;
++
++/* The real one sets SPCFLAG_MODE_CHANGE and the CPU loop re-derives
++ * cpucycleunit. Here it just does what that eventually does to the
++ * prefs, so the deferred multiplier can be checked end to end. */
++void check_prefs_changed_cpu(void)
++{
++  if (!config_changed)
++    return;
++  currprefs.cpu_clock_multiplier = changed_prefs.cpu_clock_multiplier;
++  config_changed = 0;
++}
+ 
+ extern "C" void jit_request_cpu_exit(void) { }
+ extern "C" void psctrl_jit_flush_now(void) { }
+@@ -369,6 +381,39 @@ int main(void)
+         fail("jit_power could not be turned back on");
+       break;
+     }
++
++    /*
++     * The clock multiplier is a SLOWDOWN and 0 is off - the fastest
++     * setting, and the one the emulator boots with. The row shipped
++     * with min 1, so its own default was outside its slider. It must
++     * reach 0, it must not pretend to apply live (cpucycleunit is
++     * derived in update_68k_cycles(), not poked), and a negative value
++     * is not a faster setting - jit_cpu_init() clamps it to 0.
++     */
++    for (i = 0; i < n; i++) {
++      parse(i, &r);
++      if (strcmp(r.name, "cpu_clock_multiplier"))
++        continue;
++      if (r.min != 0)
++        fail("the clock multiplier cannot reach 0, its own default");
++      if (r.klass != PS_C_DEFER)
++        fail("the clock multiplier claims to apply live");
++      if ((int)psctrl_settings_call(PSCTRL_SETINT, i, -1, 0, 0) != PS_R_REJECT)
++        fail("a negative clock multiplier was accepted");
++      if ((int)psctrl_settings_call(PSCTRL_SETINT, i, 4, 0, 0) != PS_R_DEFER)
++        fail("the clock multiplier was not deferred");
++      if (currprefs.cpu_clock_multiplier == 4)
++        fail("the clock multiplier reached currprefs before the boundary");
++      psctrl_apply_pending();
++      if (currprefs.cpu_clock_multiplier != 4)
++        fail("the clock multiplier did not apply at the boundary");
++      if ((int)psctrl_settings_call(PSCTRL_SETINT, i, 0, 0, 0) != PS_R_DEFER)
++        fail("the clock multiplier could not be set back to 0");
++      psctrl_apply_pending();
++      if (currprefs.cpu_clock_multiplier != 0)
++        fail("the clock multiplier did not go back to 0 (off)");
++      break;
++    }
+   }
+ 
+   /* --- strings ---------------------------------------------------- */
+-- 
+2.43.0
+

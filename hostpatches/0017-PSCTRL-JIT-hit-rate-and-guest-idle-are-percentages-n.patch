@@ -1,0 +1,53 @@
+From 83974b23f89863e7f49cf22346f70431e42cb291 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 03:48:04 +0000
+Subject: [PATCH] PSCTRL: JIT hit rate and guest idle are percentages, not
+ hundredths
+
+Both come back from the JIT as tenths of a percent, but the rows were
+declared PS_U_X100, so a hit rate of 100.0% read as "10.00" on the guest
+- out by a factor of ten and with no unit on it.
+
+Rather than scale the values, give the wire the unit it needed: PS_U_PCT10
+means tenths of a percent, and the guest renders 1000 as "100.0%". Appended
+to the unit enum so every existing unit keeps its number.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LS8WBqTFcMJfiNnCgYuzbm
+---
+ platforms/atari/psctrl/psctrl_settings.cpp | 4 ++--
+ platforms/atari/psctrl/psctrl_settings.h   | 3 ++-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/platforms/atari/psctrl/psctrl_settings.cpp b/platforms/atari/psctrl/psctrl_settings.cpp
+index e73f93b..0a02bab 100644
+--- a/platforms/atari/psctrl/psctrl_settings.cpp
++++ b/platforms/atari/psctrl/psctrl_settings.cpp
+@@ -665,8 +665,8 @@ ITEM("compfpu", "Translate FPU", PS_TAB_JIT, PS_K_BOOL, PS_C_DEFER,
+      PS_U_NONE, 0, 1, 1, L_OFFON, 2, 0, NULL, jg_compfpu, js_compfpu, NULL),
+ ITEM("jit_flush", "Flush cache now", PS_TAB_JIT, PS_K_ACTION, PS_C_DEFER,
+      PS_U_NONE, 0, 0, 0, NULL, 0, PS_F_NEWLINE, NULL, jg_zero, js_flush, NULL),
+-RO_INT("jit_hitrate", "JIT hit rate", PS_TAB_JIT, PS_U_X100, ig_hit),
+-RO_INT("jit_idle", "Guest idle", PS_TAB_JIT, PS_U_X100, ig_idle),
++RO_INT("jit_hitrate", "JIT hit rate", PS_TAB_JIT, PS_U_PCT10, ig_hit),
++RO_INT("jit_idle", "Guest idle", PS_TAB_JIT, PS_U_PCT10, ig_idle),
+ RO_INT("jit_cache_used", "Cache used", PS_TAB_JIT, PS_U_KB, ig_used),
+ RO_INT("jit_cache_total", "Cache total", PS_TAB_JIT, PS_U_KB, ig_total),
+ RO_INT("jit_flushes", "Hard flushes", PS_TAB_JIT, PS_U_NONE, ig_flush),
+diff --git a/platforms/atari/psctrl/psctrl_settings.h b/platforms/atari/psctrl/psctrl_settings.h
+index 24771af..32e23a4 100644
+--- a/platforms/atari/psctrl/psctrl_settings.h
++++ b/platforms/atari/psctrl/psctrl_settings.h
+@@ -86,7 +86,8 @@ enum psctrl_class {
+ /* Suffix the dialog prints after the number */
+ enum psctrl_unit {
+   PS_U_NONE = 0, PS_U_MS, PS_U_NS, PS_U_US, PS_U_KB, PS_U_MB, PS_U_PCT,
+-  PS_U_HZ, PS_U_KBPS, PS_U_CYC, PS_U_X100, PS_U_SEC
++  PS_U_HZ, PS_U_KBPS, PS_U_CYC, PS_U_X100, PS_U_SEC,
++  PS_U_PCT10          /* tenths of a percent: 1000 reads as "100.0%" */
+ };
+ 
+ /* Descriptor flags */
+-- 
+2.43.0
+

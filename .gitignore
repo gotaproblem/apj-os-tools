@@ -4,3 +4,8 @@
 mp3gem/mp3gem.c.pre-skin
 icons/out/newicons.png
 skins/_to_delete/
+
+# harness binaries and their output (deletion is blocked from the
+# cloud session, so they are ignored rather than removed)
+tests/*/harness
+tests/*/out.ppm

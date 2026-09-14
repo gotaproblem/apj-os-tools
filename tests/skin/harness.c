@@ -2,281 +2,16 @@
  * tests/skin/harness.c - build APJSKIN and MP3GEM's drawing code on the
  * host, run them against a fake 32 bpp screen, and check every blit.
  *
- * This is not an emulator. It implements exactly the VDI calls the skin
- * engine makes (vro_cpyfm S_ONLY between an MFDB and the screen, v_bar,
- * the colour registers) so that the parsing, the source rectangles and
- * the nine-slice arithmetic are exercised for real. Text is a no-op:
- * XaAES draws that, and skins/preview.py is the reference for how the
- * finished window should look.
+ * The fake VDI lives in ../stubvdi.h, shared with tests/psctrl. Text is a
+ * no-op: XaAES draws that, and skins/preview.py is the reference for how
+ * the finished window should look.
  *
  *   ./harness <file.SKN> <out.ppm>      -> 0 ok, 1 a check failed
  */
 #define APJGUI_IMPL
 
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "stub/gem.h"
-#include "../../apjgui/apjgui.h"
-#include "../../apjgui/apjskin.h"
+#include "../stubvdi.h"
 #include "../../mp3gem/mp3ui.h"
-
-short gl_apid = 1;
-
-/* -------------------------------------------------------- fake screen -- */
-#define SCR_W 1920
-#define SCR_H 1080
-static unsigned char scr[(long) SCR_W * SCR_H * 4];
-static short clip[4] = { 0, 0, SCR_W - 1, SCR_H - 1 };
-static short clip_on = 0;
-static short pal[256][3];
-static short fill_pen = 1;
-
-static long blits = 0, pixels = 0;
-static int  fails = 0;
-
-static void fail(const char *what, long a, long b)
-{
-	fprintf(stderr, "FAIL %s (%ld, %ld)\n", what, a, b);
-	fails++;
-}
-
-static void put(short x, short y, const unsigned char *px)
-{
-	unsigned char *d;
-
-	if (x < 0 || y < 0 || x >= SCR_W || y >= SCR_H)
-	{
-		fail("write off screen", x, y);
-		return;
-	}
-	if (clip_on && (x < clip[0] || y < clip[1] || x > clip[2] || y > clip[3]))
-		return;
-	d = scr + ((long) y * SCR_W + x) * 4;
-	d[0] = px[0]; d[1] = px[1]; d[2] = px[2]; d[3] = px[3];
-}
-
-void vro_cpyfm(short h, short mode, short *pxy, MFDB *src, MFDB *dst)
-{
-	short sw = (short) (pxy[2] - pxy[0] + 1);
-	short sh = (short) (pxy[3] - pxy[1] + 1);
-	short dw = (short) (pxy[6] - pxy[4] + 1);
-	short dh = (short) (pxy[7] - pxy[5] + 1);
-	short x, y;
-	(void) h;
-
-	if (mode != S_ONLY)
-		fail("raster op is not S_ONLY", mode, 0);
-	if (sw != dw || sh != dh)
-		fail("scaling blit - fVDI would not memcpy that", sw, dw);
-	if (sw <= 0 || sh <= 0)
-		return;
-
-	blits++;
-	pixels += (long) sw * sh;
-
-	if (src->fd_addr)
-	{
-		if (src->fd_stand != 0)
-			fail("source MFDB not in device format", src->fd_stand, 0);
-		if (src->fd_w & 15)
-			fail("source MFDB width not a multiple of 16", src->fd_w, 0);
-		if (pxy[0] < 0 || pxy[1] < 0 ||
-		    pxy[2] >= src->fd_w || pxy[3] >= src->fd_h)
-			fail("read outside the sheet", pxy[2], src->fd_w);
-	}
-
-	for (y = 0; y < sh; y++)
-		for (x = 0; x < sw; x++)
-		{
-			unsigned char px[4];
-			short sx = (short) (pxy[0] + x), sy = (short) (pxy[1] + y);
-			short tx = (short) (pxy[4] + x), ty = (short) (pxy[5] + y);
-
-			if (src->fd_addr)
-			{
-				const unsigned char *s = (const unsigned char *) src->fd_addr
-				    + ((long) sy * src->fd_w + sx) * 4;
-				px[0] = s[0]; px[1] = s[1]; px[2] = s[2]; px[3] = s[3];
-			}
-			else
-			{
-				const unsigned char *s;
-
-				if (sx < 0 || sy < 0 || sx >= SCR_W || sy >= SCR_H)
-					continue;
-				s = scr + ((long) sy * SCR_W + sx) * 4;
-				px[0] = s[0]; px[1] = s[1]; px[2] = s[2]; px[3] = s[3];
-			}
-
-			if (dst->fd_addr)
-			{
-				unsigned char *d = (unsigned char *) dst->fd_addr
-				    + ((long) ty * dst->fd_w + tx) * 4;
-				d[0] = px[0]; d[1] = px[1]; d[2] = px[2]; d[3] = px[3];
-			}
-			else
-				put(tx, ty, px);
-		}
-}
-
-/* ------------------------------------------------------------ the VDI -- */
-void vq_extnd(short h, short flag, short *out)
-{
-	(void) h;
-	memset(out, 0, 57 * sizeof(short));
-	if (flag == 0)
-	{
-		out[0] = SCR_W - 1;
-		out[1] = SCR_H - 1;
-	}
-	else
-		out[4] = 32;
-}
-
-void vs_color(short h, short i, short *rgb)
-{
-	(void) h;
-	if (i >= 0 && i < 256)
-	{
-		pal[i][0] = rgb[0]; pal[i][1] = rgb[1]; pal[i][2] = rgb[2];
-	}
-}
-
-void vq_color(short h, short i, short flag, short *rgb)
-{
-	(void) h; (void) flag;
-	rgb[0] = pal[i & 255][0];
-	rgb[1] = pal[i & 255][1];
-	rgb[2] = pal[i & 255][2];
-}
-
-void vs_clip(short h, short on, short *xy)
-{
-	(void) h;
-	clip_on = on;
-	if (on)
-		memcpy(clip, xy, 4 * sizeof(short));
-}
-
-void vswr_mode(short h, short m)      { (void) h; (void) m; }
-void vsf_interior(short h, short s)   { (void) h; (void) s; }
-void vsf_perimeter(short h, short s)  { (void) h; (void) s; }
-void vsf_color(short h, short c)      { (void) h; fill_pen = c; }
-void vsl_color(short h, short c)      { (void) h; fill_pen = c; }
-void vst_color(short h, short c)      { (void) h; (void) c; }
-void v_pline(short h, short n, short *xy) { (void) h; (void) n; (void) xy; }
-void v_gtext(short h, short x, short y, char *s)
-{
-	(void) h; (void) x; (void) y; (void) s;   /* XaAES draws text */
-}
-
-void v_bar(short h, short *xy)
-{
-	short x, y;
-	unsigned char px[4];
-	(void) h;
-
-	px[0] = 0;
-	px[1] = (unsigned char) ((pal[fill_pen & 255][0] * 255L + 500L) / 1000L);
-	px[2] = (unsigned char) ((pal[fill_pen & 255][1] * 255L + 500L) / 1000L);
-	px[3] = (unsigned char) ((pal[fill_pen & 255][2] * 255L + 500L) / 1000L);
-	for (y = xy[1]; y <= xy[3]; y++)
-		for (x = xy[0]; x <= xy[2]; x++)
-			if (x >= 0 && y >= 0 && x < SCR_W && y < SCR_H)
-				put(x, y, px);
-}
-
-/* the APJ*.FNT set fVDI loads: point size -> cell */
-static short cur_cw = 10, cur_ch = 20;
-
-short vst_point(short h, short pt, short *cw, short *ch, short *bw, short *bh)
-{
-	static const short tbl[5][3] = { {11,9,18},{12,10,20},{13,11,22},
-	                                 {15,12,24},{20,16,32} };
-	int i, best = 1;
-	(void) h;
-	for (i = 0; i < 5; i++)
-		if (tbl[i][0] <= pt)
-			best = i;
-	cur_cw = tbl[best][1];
-	cur_ch = tbl[best][2];
-	*cw = *bw = cur_cw;
-	*ch = *bh = cur_ch;
-	return tbl[best][0];
-}
-
-void vqt_attributes(short h, short *a)
-{
-	(void) h;
-	memset(a, 0, 10 * sizeof(short));
-	a[8] = cur_cw;
-	a[9] = cur_ch;
-}
-
-/*
- * appl_control: pretend to be XaAES with the APJ renderer, and hand back
- * the skin's own role colours (opcode 115) so apj_pen() lines up with the
- * pens the sheet was baked against.
- */
-static long theme_pal[APJ_R_N];		/* "the desktop's theme": the sheet under test */
-static short theme_set = 0;
-
-long appl_control(short ap, short what, void *p)
-{
-	long *rgb = (long *) p;
-	short i;
-	(void) ap;
-
-	if (what == 110)
-		return 1;
-	if (what == 115)
-	{
-		if (!theme_set && apj_skin_ok())
-		{
-			for (i = 0; i < APJ_R_N; i++)
-				theme_pal[i] = apj_skin_rgb(i);
-			theme_set = 1;
-		}
-		if (!theme_set)
-			return 0;
-		for (i = 0; i < APJ_R_N; i++)
-			rgb[i] = theme_pal[i];
-		return APJ_R_N;
-	}
-	return 0;
-}
-
-/* ------------------------------------------------------------ GEMDOS --- */
-static FILE *fp[8];
-
-long Fopen(const char *path, short mode)
-{
-	int i;
-	(void) mode;
-	for (i = 1; i < 8; i++)
-		if (!fp[i])
-		{
-			fp[i] = fopen(path, "rb");
-			return fp[i] ? i : -33L;
-		}
-	return -35L;
-}
-long Fread(short h, long n, void *buf)  { return (long) fread(buf, 1, (size_t) n, fp[h]); }
-long Fseek(long off, short h, short m)  { return fseek(fp[h], off, m == 0 ? SEEK_SET : SEEK_CUR); }
-long Fclose(short h)                    { fclose(fp[h]); fp[h] = NULL; return 0; }
-short Dgetdrv(void)                     { return 2; }
-
-/* the harness runs from tests/skin, so point the engine's program-directory
- * search at the built sheets */
-short shel_read(char *cmd, char *tail)
-{
-    strcpy(cmd, "../../skins/out/HARNESS.PRG");
-    tail[0] = 0;
-    return 1;
-}
 
 /* --------------------------------------------------------------- main -- */
 static const char *NAMES[] = {
@@ -414,6 +149,69 @@ int main(int argc, char **argv)
 		{
 			fprintf(stderr, "theme %s picked %s\n", want, apj_skin_wanted());
 			fail("skin did not follow the theme", 0, 0);
+		}
+	}
+
+	/*
+	 * A theme CHANGE must move the skin, not just the pens.
+	 *
+	 * apj_skin_reload() used to keep the stem the previous load had
+	 * resolved to and re-read that same sheet, so "follow the theme"
+	 * happened exactly once, at startup: switch the desktop from Fluent
+	 * Dark to Fuji and the app stayed dark, with only its nineteen pens
+	 * changing under it. Found on hardware, so it gets a test.
+	 *
+	 * Load a sibling family, make ITS palette the desktop theme, then
+	 * reload the first one and require that the reload lands on the
+	 * sibling.
+	 */
+	{
+		static const char *const fam[] = { "FLTL", "FLTD", "GRPH", "FUJI" };
+		char sib[256], here[256], *slash;
+		const char *base;
+		int k;
+
+		strcpy(here, argv[1]);
+		slash = strrchr(here, '/');
+		base = slash ? slash + 1 : here;
+
+		sib[0] = '\0';
+		for (k = 0; k < 4; k++)
+			if (strncmp(base, fam[k], 4) != 0)
+			{
+				sprintf(sib, "%.*s%s%s", (int) (base - here), here,
+				        fam[k], base + 4);
+				break;
+			}
+
+		if (sib[0] && apj_skin_load(vh, sib))
+		{
+			char wantfam[8];
+
+			strncpy(wantfam, strrchr(sib, '/') ? strrchr(sib, '/') + 1 : sib, 4);
+			wantfam[4] = '\0';
+			theme_take_from_loaded();	/* the desktop is now that theme */
+
+			/* back to the sheet under test, by name: pinned */
+			if (!apj_skin_load(vh, argv[1]))
+				fail("could not reload the sheet under test", 0, 0);
+			else if (!apj_skin_reload(vh))
+				fail("reload of a pinned skin failed", 0, 0);
+			else if (strncmp(apj_skin_wanted(), base, 4) != 0)
+				fail("a PINNED skin followed the theme - it must not", 0, 0);
+
+			/* now the same thing following the theme: must move */
+			if (!apj_skin_load(vh, NULL))
+				fail("theme-following load failed", 0, 0);
+			else if (strncmp(apj_skin_wanted(), wantfam, 4) != 0)
+			{
+				fprintf(stderr, "theme is %s but the skin is %s\n",
+				        wantfam, apj_skin_wanted());
+				fail("load did not follow the changed theme", 0, 0);
+			}
+			else if (!apj_skin_reload(vh) ||
+			         strncmp(apj_skin_wanted(), wantfam, 4) != 0)
+				fail("reload did not follow the changed theme", 0, 0);
 		}
 	}
 

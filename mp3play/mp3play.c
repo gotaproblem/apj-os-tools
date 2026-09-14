@@ -1,5 +1,5 @@
 /*
- * mp3play.c - PiStorm host MP3 player front-end (TOS .ttp)
+ * mp3play.c - PiSTorm host MP3 player front-end (TOS .ttp)
  *
  * Calls the "MP3PLAY" NatFeat exposed by the emulator, which spawns ffmpeg on
  * the Pi to decode the file and mixes the audio into the HDMI output alongside
@@ -17,7 +17,7 @@
 #include <string.h>
 #include <osbind.h>
 
-/* ---- NatFeat call stubs (ARAnyM/PiStorm ABI) -----------------------------
+/* ---- NatFeat call stubs (ARAnyM/PiSTorm ABI) -----------------------------
  * 0x7300 = NF_GETID (name ptr at 4(sp) -> id in d0)
  * 0x7301 = NF_CALL  (id at 4(sp), args after -> result in d0)
  * Emitted naked so the opcode traps on the caller's stack frame. On real
@@ -45,7 +45,7 @@ int main(int argc, char **argv)
 {
     long id = nf_id("MP3PLAY");
     if (!id) {
-        fputs("MP3PLAY NatFeat not available (not running under PiStorm?)\r\n",
+        fputs("MP3PLAY NatFeat not available (not running under PiSTorm?)\r\n",
               stderr);
         return 1;
     }

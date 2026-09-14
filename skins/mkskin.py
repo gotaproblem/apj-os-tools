@@ -35,10 +35,32 @@ PALT_N = 32                 # 19 roles + 6 extras + reserved
 F_TILEX, F_TILEY, F_SLICE9 = 1, 2, 4
 
 RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE, \
-RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL = range(12)
-RG_N = 12
+RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL, \
+RG_TAB, RG_TABBAR, RG_RADIO, RG_CHECK, RG_FIELD, RG_POPUP, RG_STATUS, \
+RG_CHEV = range(20)
+RG_N = 20
 RG_NAME = ["PANELTOP","GROUP","ROWSEL","SEEK","KNOB","BADGE",
-           "ARTPH","BTN","BTNACC","TILE","TILEACC","VSCROLL"]
+           "ARTPH","BTN","BTNACC","TILE","TILEACC","VSCROLL",
+           "TAB","TABBAR","RADIO","CHECK","FIELD","POPUP","STATUS","CHEV"]
+
+# Sheet version. 1 = the twelve media-player regions; 2 adds the seven
+# above for PSCTRL. apjskin.c loads either and marks the missing ones
+# absent, so an app built against 19 still runs on a 12-region sheet.
+SKN_VERSION = 2
+
+# Metrics the PSCTRL widgets need. Kept here rather than in every token
+# file so an existing skin JSON still builds; a token file that names one
+# of these overrides it.
+DEFAULT_METRICS = {
+    "radio":     16,
+    "check":     16,
+    "tab_h":     30,
+    "status_h":  22,
+    "field_h":   24,
+    "chev":      10,
+    "radius_tab":   5,
+    "radius_field": 4,
+}
 
 NBTNGLYPH = 19              # glyphs 0..18 get a TILE
 NACCGLYPH = 5               # glyphs 0..4 get a TILEACC
@@ -83,6 +105,13 @@ class Art:
         for i in range(h*SS):
             c = mix(top, bot, i / float(max(1, h*SS - 1)))
             self.d.rectangle([x*SS, y*SS + i, x*SS + w*SS - 1, y*SS + i], fill=c)
+
+    def line(self, pts, fill, width=1):
+        self.d.line([(x*SS, y*SS) for x, y in pts], fill=fill,
+                    width=max(1, width*SS), joint="curve")
+
+    def poly(self, pts, fill):
+        self.d.polygon([(x*SS, y*SS) for x, y in pts], fill=fill)
 
     def paste(self, im, x, y):
         """paste an already-final-resolution RGBA image (post-downsample)"""
@@ -139,7 +168,9 @@ class Shelf:
 # ---------------------------------------------------------------- build --
 def build(skin, scale, gnames, gfiles):
     S = scale / 100.0
-    M = {k: max(1, int(round(v * S))) for k, v in skin["metrics"].items()}
+    raw = dict(DEFAULT_METRICS)
+    raw.update(skin["metrics"])
+    M = {k: max(1, int(round(v * S))) for k, v in raw.items()}
     C = {k: rgb(v) for k, v in skin["roles"].items()}
     C.update({k: rgb(v) for k, v in skin["extra"].items()})
     hair = over(C["HAIR"], C["PANEL"])
@@ -198,8 +229,13 @@ def build(skin, scale, gnames, gfiles):
     # --- 5 BADGE ----------------------------------------------------------
     bh = M["badge_h"]
     bw = M["radius_badge"] * 4 + 4
+    # 0 plain, 1 accent, and (version 2) 2 warn / 3 danger - the apply
+    # class badge on a PSCTRL row: live, changed, deferred, needs restart.
+    warn   = mix(C["ACCENT"], (255, 176, 0), .85)
+    danger = mix(C["ALBG"], (255, 90, 70), .35)
     badge = []
-    for fill, out in ((C["PANEL"], C["BORDER"]), (C["ACCENT"], None)):
+    for fill, out in ((C["PANEL"], C["BORDER"]), (C["ACCENT"], None),
+                      (warn, None), (danger, None)):
         a = Art(bw, bh, C["PANEL"])
         a.rrect(0, 0, bw, bh, M["radius_badge"], fill=fill, outline=out,
                 width=M["border"])
@@ -223,7 +259,11 @@ def build(skin, scale, gnames, gfiles):
     for st in range(NSTATE):
         a = Art(bs, bs, C["PANEL"])
         if st == 0:
-            pass                                   # normal == bare panel
+            # A LABELLED button, unlike a transport tile, has to read as a
+            # button when nothing is pointing at it: a bare panel plate
+            # left "Flush cache now" as floating text.
+            a.rrect(0, 0, bs, bs, M["radius_btn"], fill=C["FACE"],
+                    outline=C["BORDER"], width=M["border"])
         elif st == 1:
             a.rrect(0, 0, bs, bs, M["radius_btn"], fill=C["HOVER"], outline=hair,
                     width=M["border"])
@@ -293,6 +333,140 @@ def build(skin, scale, gnames, gfiles):
     parts[RG_VSCROLL] = vs
     ins_vscroll = (0, vw // 2 + 1, 0, vw // 2 + 1)
 
+    # --- 12 TAB: one tab item. Selected carries the accent rail along
+    # its bottom edge, which is what Fluent uses instead of a raised tab;
+    # the rail is inside the bottom inset so nine-slice never stretches
+    # it into a gradient.
+    tabh = M["tab_h"]
+    tabw = M["radius_tab"] * 3 + 2 * M["border"] + 4
+    rail = M["rail"]
+    tabs = []
+    for st in range(NSTATE):
+        a = Art(tabw, tabh, C["PANEL_TOP"])
+        if st == 1:
+            a.rrect(0, 0, tabw, tabh, M["radius_tab"], fill=C["HOVER"])
+        elif st == 2:
+            a.rrect(0, 0, tabw, tabh, M["radius_tab"], fill=C["PRESSED"])
+        elif st == 3:                       # selected
+            a.rrect(0, 0, tabw, tabh, M["radius_tab"], fill=C["PANEL"])
+        tabs.append(a.finish())
+    parts[RG_TAB] = tabs
+    # The accent rail under the selected tab is NOT baked in. Nine-slice
+    # takes only the corners from the sheet and fills the edges flat
+    # (that is the 1859 -> 44 blit change), so anything drawn along the
+    # middle of an edge survives only under the corners. psui.c draws the
+    # rail as one v_bar instead.
+    ins_tab = (M["radius_tab"] + 1,) * 4
+    _ = rail
+
+    # --- 13 TABBAR: the strip behind the tabs, tiled across
+    tbw = 16 * ((max(16, int(round(64 * S))) + 15) // 16)
+    a = Art(tbw, tabh, C["PANEL_TOP"])
+    a.rect(0, tabh - max(1, M["border"]), tbw, max(1, M["border"]), C["BORDER"])
+    parts[RG_TABBAR] = [a.finish()]
+
+    # --- 14 RADIO: off/on x norm,hover,press,disabled
+    rd = M["radio"]
+    ring = max(1, rd // 8)
+    radios = []
+    for on in (0, 1):
+        for st in range(NSTATE):
+            a = Art(rd, rd, C["PANEL"])
+            if not on:
+                edge = (C["BORDER"], C["MUTED"], C["ACCENT_DEEP"],
+                        C["DISABLED"])[st]
+                face = (C["PAPER"], C["HOVER"], C["PRESSED"], C["PANEL"])[st]
+                a.ellipse(0, 0, rd, rd, fill=face, outline=edge, width=ring)
+            else:
+                col = (C["ACCENT"], mix(C["ACCENT"], (255,255,255), .16),
+                       C["ACCENT_DEEP"], C["DISABLED"])[st]
+                a.ellipse(0, 0, rd, rd, fill=col)
+                # the hole, not a dot: a Fluent radio is a ring with the
+                # ground showing through, so it reads at 16 px
+                k = max(2, rd // 3)
+                a.ellipse((rd - k) // 2, (rd - k) // 2, k, k, fill=C["PANEL"])
+            radios.append(a.finish())
+    parts[RG_RADIO] = radios
+
+    # --- 15 CHECK: same eight, square, with a drawn tick
+    ck = M["check"]
+    checks = []
+    for on in (0, 1):
+        for st in range(NSTATE):
+            a = Art(ck, ck, C["PANEL"])
+            if not on:
+                edge = (C["BORDER"], C["MUTED"], C["ACCENT_DEEP"],
+                        C["DISABLED"])[st]
+                face = (C["PAPER"], C["HOVER"], C["PRESSED"], C["PANEL"])[st]
+                a.rrect(0, 0, ck, ck, M["radius_badge"], fill=face,
+                        outline=edge, width=max(1, M["border"]))
+            else:
+                col = (C["ACCENT"], mix(C["ACCENT"], (255,255,255), .16),
+                       C["ACCENT_DEEP"], C["DISABLED"])[st]
+                a.rrect(0, 0, ck, ck, M["radius_badge"], fill=col)
+                a.line([(ck * 0.24, ck * 0.52), (ck * 0.43, ck * 0.72),
+                        (ck * 0.78, ck * 0.28)], C["ACCENT_INK"],
+                       width=max(1, ck // 8))
+            checks.append(a.finish())
+    parts[RG_CHECK] = checks
+
+    # --- 16 FIELD: value box / text entry, norm / focus / disabled
+    fh_ = M["field_h"]
+    fw_ = M["radius_field"] * 3 + 2 * M["border"] + 4
+    fields = []
+    for face, edge in ((C["PAPER"], C["BORDER"]),
+                       (C["PAPER"], C["ACCENT"]),
+                       (C["PANEL"], C["DISABLED"])):
+        a = Art(fw_, fh_, C["PANEL"])
+        a.rrect(0, 0, fw_, fh_, M["radius_field"], fill=face, outline=edge,
+                width=max(1, M["border"]))
+        fields.append(a.finish())
+    parts[RG_FIELD] = fields
+    ins_field = (M["radius_field"] + 1,) * 4
+
+    # --- 17 POPUP: the plate for an enum with more than four choices.
+    # The chevron is baked at the right and the right inset is wide
+    # enough to keep it out of the stretched middle.
+    chev = M["chev"]
+    pw = M["radius_field"] * 3 + 2 * M["border"] + 6
+    popups = []
+    for st in range(NSTATE):
+        face = (C["PANEL"], C["HOVER"], C["PRESSED"], C["PANEL"])[st]
+        edge = (C["BORDER"], hair, C["BORDER"], C["DISABLED"])[st]
+        a = Art(pw, fh_, C["PANEL"])
+        a.rrect(0, 0, pw, fh_, M["radius_field"], fill=face, outline=edge,
+                width=max(1, M["border"]))
+        popups.append(a.finish())
+    parts[RG_POPUP] = popups
+    ins_popup = (M["radius_field"] + 1,) * 4
+
+    # --- 19 CHEV: the popup's arrow, pre-composited against each plate
+    # state's own fill so it can be blitted on top of the stretched plate
+    # Deliberately a SMALL block, not the height of the plate: it is
+    # blitted on top of a plate that has been stretched to whatever the
+    # row height is, and a block as tall as the plate paints over the
+    # plate's own top and bottom border lines.
+    cw_ = chev + 2 * M["border"] + 4
+    chh = chev + 4
+    chevs = []
+    for st in range(NSTATE):
+        face = (C["PANEL"], C["HOVER"], C["PRESSED"], C["PANEL"])[st]
+        ink  = C["DISABLED"] if st == 3 else C["TEXT"]
+        a = Art(cw_, chh, face)
+        cy = (chh - chev // 2) // 2
+        cx = (cw_ - chev) // 2
+        a.line([(cx, cy), (cx + chev / 2.0, cy + chev / 2.0), (cx + chev, cy)],
+               ink, width=max(1, chev // 6))
+        chevs.append(a.finish())
+    parts[RG_CHEV] = chevs
+
+    # --- 18 STATUS: the bottom strip, tiled across
+    stw = 16 * ((max(16, int(round(64 * S))) + 15) // 16)
+    sth = M["status_h"]
+    a = Art(stw, sth, C["PANEL"])
+    a.rect(0, 0, stw, max(1, M["border"]), hair)
+    parts[RG_STATUS] = [a.finish()]
+
     bw = M["border"]
     P, B = C["PANEL"], C["BORDER"]
     #   region -> [(fill, border)] per state, and the border width in px
@@ -303,15 +477,30 @@ def build(skin, scale, gnames, gfiles):
         RG_SEEK:     ([(C["PAPER"], C["PAPER"]), (B, B),
                        (C["ACCENT"], C["ACCENT"])], 0),
         RG_KNOB:     ([(P, P)] * 3, 0),
-        RG_BADGE:    ([(P, B), (C["ACCENT"], C["ACCENT"])], bw),
+        RG_BADGE:    ([(P, B), (C["ACCENT"], C["ACCENT"]),
+                       (warn, warn), (danger, danger)], bw),
         RG_ARTPH:    ([(P, P)], 0),
-        RG_BTN:      ([(P, P), (C["HOVER"], hair),
+        RG_BTN:      ([(C["FACE"], B), (C["HOVER"], hair),
                        (C["PRESSED"], B), (C["HOVER"], hair)], bw),
         RG_BTNACC:   ([(P, P)] * 4, 0),
         RG_TILE:     ([(P, P)] * (NBTNGLYPH * NSTATE), 0),
         RG_TILEACC:  ([(P, P)] * (NACCGLYPH * NSTATE), 0),
         RG_VSCROLL:  ([(C["PAPER"], C["PAPER"]), (C["DISABLED"], C["DISABLED"]),
                        (C["MUTED"], C["MUTED"])], 0),
+        RG_TAB:      ([(C["PANEL_TOP"], C["PANEL_TOP"]),
+                       (C["HOVER"], C["HOVER"]),
+                       (C["PRESSED"], C["PRESSED"]),
+                       (C["PANEL"], C["PANEL"])], 0),
+        RG_TABBAR:   ([(C["PANEL_TOP"], C["PANEL_TOP"])], 0),
+        RG_RADIO:    ([(P, P)] * (2 * NSTATE), 0),
+        RG_CHECK:    ([(P, P)] * (2 * NSTATE), 0),
+        RG_FIELD:    ([(C["PAPER"], B), (C["PAPER"], C["ACCENT"]),
+                       (P, C["DISABLED"])], bw),
+        RG_POPUP:    ([(P, B), (C["HOVER"], hair),
+                       (C["PRESSED"], B), (P, C["DISABLED"])], bw),
+        RG_STATUS:   ([(P, P)], 0),
+        RG_CHEV:     ([(P, P), (C["HOVER"], C["HOVER"]),
+                       (C["PRESSED"], C["PRESSED"]), (P, P)], 0),
     }
 
     # ------------------------------------------------------------ layout --
@@ -321,15 +510,24 @@ def build(skin, scale, gnames, gfiles):
         RG_ROWSEL:   (1,  ins_row,                     F_SLICE9),
         RG_SEEK:     (3,  ins_seek,                    F_SLICE9),
         RG_KNOB:     (3,  (0,0,0,0),                   0),
-        RG_BADGE:    (2,  ins_badge,                   F_SLICE9),
+        RG_BADGE:    (4,  ins_badge,                   F_SLICE9),
         RG_ARTPH:    (1,  (0,0,0,0),                   0),
         RG_BTN:      (4,  (ins_btn,)*4,                F_SLICE9),
         RG_BTNACC:   (4,  (0,0,0,0),                   0),
         RG_TILE:     (NBTNGLYPH*NSTATE, (0,0,0,0),     0),
         RG_TILEACC:  (NACCGLYPH*NSTATE, (0,0,0,0),     0),
         RG_VSCROLL:  (3,  ins_vscroll,                 F_SLICE9),
+        RG_TAB:      (4,  ins_tab,                     F_SLICE9),
+        RG_TABBAR:   (1,  (0,0,0,0),                   F_TILEX),
+        RG_RADIO:    (2*NSTATE, (0,0,0,0),             0),
+        RG_CHECK:    (2*NSTATE, (0,0,0,0),             0),
+        RG_FIELD:    (3,  ins_field,                   F_SLICE9),
+        RG_POPUP:    (4,  ins_popup,                   F_SLICE9),
+        RG_STATUS:   (1,  (0,0,0,0),                   F_TILEX),
+        RG_CHEV:     (4,  (0,0,0,0),                   0),
     }
-    COLS = {RG_TILE: NSTATE * 4, RG_TILEACC: NSTATE * 2}
+    COLS = {RG_TILE: NSTATE * 4, RG_TILEACC: NSTATE * 2,
+            RG_RADIO: NSTATE, RG_CHECK: NSTATE}
 
     SHEET_W = 16 * ((int(round(560 * S)) + 15) // 16)
     shelf = Shelf(SHEET_W)
@@ -405,7 +603,7 @@ def write_skn(b, path):
 
     pixl = sheet.convert("RGB").tobytes()        # RGB24, row-major, top-down
 
-    head = struct.pack(">4s7H2H4I", b"APJS", 1, b["scale"], W, H, RG_N,
+    head = struct.pack(">4s7H2H4I", b"APJS", SKN_VERSION, b["scale"], W, H, RG_N,
                        b["nglyph"], b["gsz"], b["gcols"], mw,
                        off_regn, off_palt, off_mask, off_pixl)
     head += struct.pack(">2H", b["tile"][0], b["tile"][1])

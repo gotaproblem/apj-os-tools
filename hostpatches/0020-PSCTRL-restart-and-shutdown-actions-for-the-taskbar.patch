@@ -1,0 +1,157 @@
+From 6456c0c3d7a6a69d4556bf659dc6e58aea9dd306 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 14 Sep 2026 02:34:54 +0000
+Subject: [PATCH] PSCTRL: restart and shutdown actions for the taskbar
+
+Two new NatFeat sub-ops, PSCTRL_RESTART (12) and PSCTRL_SHUTDOWN (13),
+both leaving through the emulator's ordinary orderly-exit path so they
+tear down exactly the way Ctrl-C does - CPU stopped, JIT stats dumped, tty
+restored.
+
+sigint_handler's body is factored into orderly_teardown(); the new
+pistorm_request_exit(restart) calls it and then _exit(restart ? 42 : 0).
+42 is the code the launcher relaunches on (already the crash handler's
+code), so "restart" comes straight back up and re-reads the .cfg the user
+saved - a real cold boot with the new settings. 0 is a clean stop back to
+the console. Launch through a wrapper that relaunches on 42 (run-pistorm.sh)
+for restart to relaunch rather than fall through to the shell.
+
+The guest asks for confirmation before calling either. Host settings test
+passes with a stub for the new entry point.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LS8WBqTFcMJfiNnCgYuzbm
+---
+ emulator.c                                    | 34 ++++++++++++++++---
+ platforms/atari/psctrl/psctrl_settings.cpp    | 16 +++++++++
+ platforms/atari/psctrl/psctrl_settings.h      |  5 ++-
+ .../atari/psctrl/test_psctrl_settings.cpp     |  1 +
+ 4 files changed, 50 insertions(+), 6 deletions(-)
+
+diff --git a/emulator.c b/emulator.c
+index 551f4d6..c680ef8 100755
+--- a/emulator.c
++++ b/emulator.c
+@@ -1191,7 +1191,12 @@ void *foldchk_thread(void *arg)
+   return NULL;
+ }
+ 
+-void sigint_handler(int sig_num)
++/*
++ * The orderly teardown, without the _exit - shared by the Ctrl-C / SIGTERM
++ * handler and the PSCTRL restart/shutdown actions, so all three quit the
++ * same proven way: stop the CPU, dump JIT stats, restore the tty.
++ */
++static void orderly_teardown(void)
+ {
+   cpu_emulation_running = 0;
+ 
+@@ -1200,20 +1205,39 @@ void sigint_handler(int sig_num)
+   /* JIT statistics (PROFILE_UNTRANSLATED_INSNS: top-50 interpreted opcodes) */
+   compiler_dump_stats();
+ 
+-  /* display ATARI logo on exit (HDMI) */
+-  // if ( RTG_enabled )
+-  //   logo ();
+-
+   usleep(100000);
+ 
+   /* reset stdio tty properties */
+   oldt.c_lflag |= ECHO;
+   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+   fcntl(STDIN_FILENO, F_SETFL, oldf);
++}
+ 
++void sigint_handler(int sig_num)
++{
++  (void) sig_num;
++  orderly_teardown();
+   _exit(0);
+ }
+ 
++/*
++ * Restart / shutdown from the PSCTRL taskbar. Runs on the CPU thread from
++ * inside the NatFeat handler; _exit() ends the process there and then.
++ *
++ * restart != 0 exits 42, the code the launcher relaunches on (the same
++ * code the crash handler uses), so the emulator comes straight back up and
++ * re-reads the .cfg the user just saved - a genuine cold boot with the new
++ * settings. restart == 0 exits 0, which the launcher treats as a clean
++ * stop, dropping back to the console. Launch through run-pistorm.sh (or
++ * any while-loop that relaunches on 42) for restart to relaunch rather
++ * than fall through to the shell.
++ */
++extern "C" void pistorm_request_exit(int restart)
++{
++  orderly_teardown();
++  _exit(restart ? 42 : 0);
++}
++
+ 
+ void *cpu_task(void *)
+ {
+diff --git a/platforms/atari/psctrl/psctrl_settings.cpp b/platforms/atari/psctrl/psctrl_settings.cpp
+index e887687..a768d57 100644
+--- a/platforms/atari/psctrl/psctrl_settings.cpp
++++ b/platforms/atari/psctrl/psctrl_settings.cpp
+@@ -55,6 +55,8 @@ extern "C" void psctrl_guest_read(uint32_t addr, char *dst, uint32_t n);
+ 
+ /* jit_glue.cpp */
+ extern "C" void jit_request_cpu_exit(void);
++/* emulator.c: orderly teardown then _exit(restart ? 42 : 0) */
++extern "C" void pistorm_request_exit(int restart);
+ /* compemu_support_arm.cpp, added alongside the psctrl_jit_* readers */
+ extern "C" void psctrl_jit_flush_now(void);
+ /* newcpu.cpp */
+@@ -1164,6 +1166,20 @@ uint32_t psctrl_settings_call(uint32_t subop, uint32_t p0, uint32_t p1,
+     case PSCTRL_SETAPI:
+       return PSCTRL_SET_API_VERSION;
+ 
++    /*
++     * Restart and shutdown, from the taskbar. Both leave through the
++     * emulator's ordinary orderly-exit path (tty restored, JIT stats
++     * dumped): restart exits 42 so the launcher relaunches it, which
++     * re-reads the .cfg the user just saved and cold-boots; shutdown
++     * exits 0 so the launcher stops and drops back to the console.
++     * The guest asks only after its own confirmation dialog. */
++    case PSCTRL_RESTART:
++      pistorm_request_exit(1);
++      return PS_R_OK;		/* not reached */
++    case PSCTRL_SHUTDOWN:
++      pistorm_request_exit(0);
++      return PS_R_OK;		/* not reached */
++
+     case PSCTRL_COUNT:
+       return (uint32_t)NITEMS;
+ 
+diff --git a/platforms/atari/psctrl/psctrl_settings.h b/platforms/atari/psctrl/psctrl_settings.h
+index 32e23a4..a424b3d 100644
+--- a/platforms/atari/psctrl/psctrl_settings.h
++++ b/platforms/atari/psctrl/psctrl_settings.h
+@@ -43,7 +43,10 @@ enum psctrl_set_subop {
+   PSCTRL_ACTION   = 9,   /* p0 idx, p1 arg          -> PS_R_* or a value  */
+   PSCTRL_LIST     = 10,  /* p0 which, p1 i, p2 buf, p3 len -> len; i<0 =
+                           * rescan and return the count                   */
+-  PSCTRL_SETAPI   = 11   /*                         -> settings API version */
++  PSCTRL_SETAPI   = 11,  /*                         -> settings API version */
++  PSCTRL_RESTART  = 12,  /* re-read the .cfg and cold-boot: orderly exit
++                          * with code 42 so the launcher relaunches       */
++  PSCTRL_SHUTDOWN = 13   /* orderly exit with code 0: stop, back to console */
+ };
+ 
+ /* PS_SETINT / PS_SETSTR / PS_ACTION results */
+diff --git a/platforms/atari/psctrl/test_psctrl_settings.cpp b/platforms/atari/psctrl/test_psctrl_settings.cpp
+index a97a996..83f7ada 100644
+--- a/platforms/atari/psctrl/test_psctrl_settings.cpp
++++ b/platforms/atari/psctrl/test_psctrl_settings.cpp
+@@ -53,6 +53,7 @@ void check_prefs_changed_cpu(void)
+ 
+ extern "C" void jit_request_cpu_exit(void) { }
+ extern "C" void psctrl_jit_flush_now(void) { }
++extern "C" void pistorm_request_exit(int restart) { (void) restart; }
+ bool check_prefs_changed_comp(bool checkonly)
+ {
+   if (!checkonly)
+-- 
+2.43.0
+

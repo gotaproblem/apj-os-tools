@@ -46,6 +46,17 @@ enum
 	APJ_RG_TILE,		/* plate + glyph, APJ_G_* x 4 states              */
 	APJ_RG_TILEACC,		/* round accent plate + glyph, 5 glyphs x 4       */
 	APJ_RG_VSCROLL,		/* playlist scrollbar: trough, thumb, thumb held  */
+	/* --- added for PSCTRL (sheet version 2). A version 1 sheet simply
+	 * does not carry these; apj_skin_has() says so and every draw call
+	 * for one is a no-op, so MP3GEM keeps working with an old .SKN. --- */
+	APJ_RG_TAB,		/* tab item plate, 4 states, selected carries the rail */
+	APJ_RG_TABBAR,		/* the strip the tabs sit on, tiled across         */
+	APJ_RG_RADIO,		/* 8: off/on x norm,hover,press,disabled           */
+	APJ_RG_CHECK,		/* 8: same order                                   */
+	APJ_RG_FIELD,		/* value box / text entry: norm, focus, disabled   */
+	APJ_RG_POPUP,		/* enum popup plate, 4 states, chevron baked right */
+	APJ_RG_STATUS,		/* status strip ground, tiled across               */
+	APJ_RG_CHEV,		/* the popup's arrow, 4 states to match the plate  */
 	APJ_RG_N
 };
 
@@ -65,6 +76,20 @@ enum
 
 /* --------------------------------------------------------- states etc -- */
 enum { APJ_ST_NORM, APJ_ST_HOVER, APJ_ST_PRESS, APJ_ST_ON, APJ_ST_N };
+
+/* RADIO and CHECK: state = APJ_CK(on, APJ_ST_*) - four appearances each
+ * for off and on, in that order. APJ_ST_ON doubles as "disabled" here,
+ * which is why a disabled control is drawn with APJ_CK(v, APJ_ST_ON). */
+#define APJ_CK(on, st)	((short) ((on) ? 4 + (st) : (st)))
+
+/* FIELD */
+enum { APJ_FLD_NORM, APJ_FLD_FOCUS, APJ_FLD_DIS };
+
+/* BADGE gained two states in sheet version 2: the apply-class badge on a
+ * PSCTRL row is plain for live, accent for a value that changed, warn for
+ * deferred and danger for one that needs a restart. States 0 and 1 are
+ * unchanged, so MP3GEM's codec pills are unaffected. */
+enum { APJ_BG_PLAIN, APJ_BG_ACCENT, APJ_BG_WARN, APJ_BG_DANGER };
 enum { APJ_SK_TRACK, APJ_SK_BUF, APJ_SK_FILL };
 enum { APJ_VS_TROUGH, APJ_VS_THUMB, APJ_VS_HELD };
 
@@ -90,11 +115,24 @@ short apj_skin_load(short vh, const char *name);	/* NULL = follow the theme */
 short apj_skin_reload(short vh);			/* after APJ_SKINCHG       */
 void  apj_skin_free(void);
 short apj_skin_ok(void);
+/* 1 if this sheet carries that region. A version 1 sheet stops at
+ * APJ_RG_VSCROLL, so an app that wants the PSCTRL widgets must ask. */
+short apj_skin_has(short rid);
 
 /* After a failed load: the file it wanted and the folders it looked in,
  * so an app can say so on screen instead of silently looking unchanged. */
 const char *apj_skin_wanted(void);
 const char *apj_skin_tried(void);
+
+/*
+ * Where to look first. An app calls this before apj_skin_load() with a
+ * folder from its own .INF, because progdir is not a reliable answer for
+ * everyone: a .PRG sits with the rest of the tools and finds SKINS\ beside
+ * itself, but a DESK ACCESSORY is loaded from the root of the boot drive,
+ * so its progdir is C:\ and it cannot see them. Pass NULL or "" to clear.
+ */
+void  apj_skin_setdir(const char *dir);
+const char *apj_skin_dir(void);
 
 short apj_skin_scale(void);				/* 100, 125, 175           */
 void  apj_skin_prefer(short scale);		/* 0 = by screen; else fixed - before load */
@@ -107,6 +145,16 @@ short apj_skin_accd(void);				/* round button diameter   */
 short apj_skin_glyphsz(void);
 
 long  apj_skin_rgb(short role);				/* 0x00RRGGBB, -1 if none  */
+
+/*
+ * The screen's own pixel format, and how to make one. Any MFDB blitted
+ * to the screen with vro_cpyfm must have the SAME plane count - the VDI
+ * will not convert - which is why the sheet is built in screen format
+ * rather than in a fixed one. Anything else that wants to put its own
+ * pixels on the screen needs the same two answers.
+ */
+short apj_skin_planes(void);			/* 16 or 32; 0 = no sheet yet */
+long  apj_skin_pack(long rgb);			/* 0x00RRGGBB -> a screen pixel */
 short apj_skin_pen(short role);				/* VDI pen for a role      */
 
 void  apj_skin_blit (short vh, short rid, short state, short x, short y);

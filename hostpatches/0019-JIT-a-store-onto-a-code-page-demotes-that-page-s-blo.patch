@@ -1,0 +1,307 @@
+From 6b6b69bb9ad9ac2bd4a212e86b63fc573c65d133 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 10:40:35 +0000
+Subject: [PATCH] JIT: a store onto a code page demotes that page's blocks, not
+ the whole cache
+
+pistorm_smc() answered a guest store into any 4 KB page that had ever
+produced compiled code with cache_invalidate() - flush_icache(0), the
+lazy flush of every active block. The page mark was never cleared for
+ST-RAM, so a page that once held a program's code and was later
+Mxalloc'd to something else as DATA cost a whole-cache flush on every
+store, for the life of the boot.
+
+Found by PSCTRL's benchmark: its "Mixed" loop collapsed from 239 MIPS
+to 9 on the same binary, and taking the 16-instruction unit apart a
+piece at a time put the cost on the load/store pair - 2000 ns a unit
+against 80 - while the streaming ST-RAM loop 32 KB higher up ran at full
+speed. The scratch buffer's first page had held a finished program's
+code. Any ST program keeping hot data in recycled ST-RAM paid the same.
+
+jit_demote_page() walks the active list once and gives ONLY the blocks
+whose source overlaps the page the treatment flush_icache_lazy gives
+every block: handler -> popall_check_checksum, status NEED_CHECK, moved
+to dormant. pistorm_smc_page() then clears the page mark. That is
+sound because dormant blocks always verify by checksum before they run;
+a mark is needed only while an ACTIVE block has code on the page, and
+block_check_checksum() now re-marks a block's pages when it reactivates
+one (ST-RAM only - TT-RAM keeps its mprotect scheme unchanged).
+
+So the stale-page case is one walk of the active list, then O(1) per
+store. Code and hot data genuinely sharing a live page costs what it
+cost before, never more.
+
+Two counters for PSMON, PS_GETINT 78 and 79: stores that hit a code
+page, and how many of those found no active block there.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LS8WBqTFcMJfiNnCgYuzbm
+---
+ jit/arm/compemu_support_arm.cpp   | 75 +++++++++++++++++++++++++++++++
+ pistorm_natmem.cpp                | 65 +++++++++++++++++++++++----
+ platforms/atari/psctrl/psctrl.cpp | 16 +++++++
+ platforms/atari/psctrl/psctrl.h   | 14 +++++-
+ 4 files changed, 160 insertions(+), 10 deletions(-)
+
+diff --git a/jit/arm/compemu_support_arm.cpp b/jit/arm/compemu_support_arm.cpp
+index 2c88236..4be23ce 100755
+--- a/jit/arm/compemu_support_arm.cpp
++++ b/jit/arm/compemu_support_arm.cpp
+@@ -3151,6 +3151,18 @@ static inline int block_check_checksum(blockinfo* bi)
+         add_to_active(bi);
+         raise_in_cl_list(bi);
+         bi->status = BI_ACTIVE;
++        /* PiStorm: an ACTIVE block runs unverified, so its pages must
++         * be marked again - jit_demote_page() may have cleared them. */
++        {
++            extern void pistorm_remark_code(uaecptr, uae_u32);
++            checksum_info* csi = bi->csi;
++            while (csi) {
++                pistorm_remark_code((uaecptr)((uintptr)csi->start_p
++                                              - (uintptr)natmem_offset),
++                                    csi->length);
++                csi = csi->next;
++            }
++        }
+     } else {
+         /* This block actually changed. We need to invalidate it,
+            and set it up to be recompiled */
+@@ -3719,6 +3731,69 @@ static inline void flush_icache_lazy(int v)
+ #endif
+ }
+ 
++/*
++ * PiStorm: the targeted form of the lazy flush above.
++ *
++ * pistorm_smc() used to answer a guest store into a 4 KB page that had
++ * ever produced compiled code with flush_icache(0) - every active block
++ * demoted to needs-a-checksum, on every such store, for the life of the
++ * boot. That page mark was never cleared for ST-RAM, so a page that once
++ * held a program's code and was later Mxalloc'd to something else as
++ * DATA cost a whole-cache flush per store forever: a 16-instruction
++ * benchmark unit went from 80 ns to 2000 ns, and any ST program keeping
++ * hot data in recycled ST-RAM paid the same.
++ *
++ * This walks the active list once and demotes ONLY the blocks whose
++ * source bytes overlap the page - exactly the per-block treatment
++ * flush_icache_lazy gives every block - and reports how many. The
++ * caller then clears the page mark: dormant blocks always re-verify by
++ * checksum before they run, so a page mark is only needed while an
++ * ACTIVE block has code on it. block_check_checksum() re-marks a page
++ * when it reactivates a block, which keeps that invariant.
++ *
++ * The page address is a guest address; the block ranges are host
++ * pointers into natmem, as calc_checksum() reads them.
++ */
++extern "C" int jit_demote_page(uae_u32 gpage)
++{
++    blockinfo* bi;
++    uae_u8* lo;
++    uae_u8* hi;
++    int n = 0;
++
++    if (!active || !natmem_offset)
++        return 0;
++    lo = natmem_offset + gpage;
++    hi = lo + 4096;
++
++    bi = active;
++    while (bi) {
++        blockinfo* next = bi->next;	/* we may unlink bi below */
++
++        if (bi->status == BI_ACTIVE) {
++            checksum_info* csi = bi->csi;
++            while (csi) {
++                if (csi->start_p < hi && csi->start_p + csi->length > lo)
++                    break;
++                csi = csi->next;
++            }
++            if (csi) {
++                uae_u32 cl = cacheline(bi->pc_p);
++                if (bi == cache_tags[cl + 1].bi)
++                    cache_tags[cl].handler = (cpuop_func*)popall_check_checksum;
++                bi->handler_to_use = (cpuop_func*)popall_check_checksum;
++                set_dhtu(bi, bi->direct_pcc);
++                bi->status = BI_NEED_CHECK;
++                remove_from_list(bi);
++                add_to_dormant(bi);
++                n++;
++            }
++        }
++        bi = next;
++    }
++    return n;
++}
++
+ int failure;
+ 
+ static inline unsigned int get_opcode_cft_map(unsigned int f)
+diff --git a/pistorm_natmem.cpp b/pistorm_natmem.cpp
+index 5d55293..c788045 100755
+--- a/pistorm_natmem.cpp
++++ b/pistorm_natmem.cpp
+@@ -234,9 +234,9 @@ extern bool DMA_Sound_enabled;
+ void invalidate_block(blockinfo *); // verified in compemu_support_arm.cpp
+ 
+ /* cache_invalidate() is OURS (not an Amiberry symbol — the JIT exposes the
+- * flush_icache function pointer instead). pistorm_smc() calls it only when a
+- * write lands on a 4KB page previously marked as holding compiled code, so the
+- * full flush here is coarse but infrequent. flush_icache is set during JIT
++ * flush_icache function pointer instead). The TT-RAM SIGSEGV handler calls
++ * it; ST-RAM stores no longer do - see pistorm_smc_page(), which demotes
++ * only the blocks on the written page. flush_icache is set during JIT
+  * init; guard against the pre-init NULL. */
+ void cache_invalidate(void)
+ {
+@@ -1157,6 +1157,54 @@ extern void pistorm_mark_code(uaecptr pc) // call from compile_block()
+     }
+ }
+ 
++/* ST-RAM only: the page bitmap, nothing else. TT-RAM pages are governed
++ * by the mprotect scheme above and keep their existing behaviour. Called
++ * from block_check_checksum() when a block is reactivated, because
++ * pistorm_smc_page() below clears the mark when it demotes the blocks. */
++extern void pistorm_remark_code(uaecptr start, uae_u32 len)
++{
++    uae_u32 pg, last;
++
++    if (start >= TT_RAM_BASE || len == 0)
++        return;
++    pg = start >> PAGE_SHIFT;
++    last = (start + len - 1) >> PAGE_SHIFT;
++    if (last >= TT_RAM_BASE >> PAGE_SHIFT)
++        last = (TT_RAM_BASE >> PAGE_SHIFT) - 1;
++    for (; pg <= last; pg++)
++        code_page[pg] = 1;
++}
++
++/* A guest store landed on a page marked as code. This was
++ * cache_invalidate() - a lazy flush of EVERY active block - and the mark
++ * stayed set for the life of the boot, so a page that had once held a
++ * program's code and was later handed out as data cost a whole-cache
++ * flush on every store, forever. Measured: a 16-instruction loop unit at
++ * 2000 ns instead of 80, because its scratch buffer sat where a finished
++ * program's code had been.
++ *
++ * Now: demote only the active blocks with source on this page (they
++ * re-verify by checksum before they run again, and recompile if the
++ * bytes changed), then clear the mark. Dormant blocks always verify, so
++ * the mark is only needed while an active block has code here, and
++ * reactivation puts it back. The stale-page case - the common one - is
++ * one walk of the active list and then O(1) per store. */
++extern "C" int jit_demote_page(uae_u32 gpage);
++volatile uint32_t psctrl_ctr_smc_hits = 0;   /* stores that hit a code page */
++volatile uint32_t psctrl_ctr_smc_stale = 0;  /* ...where no live block was  */
++static void pistorm_smc_page(uae_u32 pg)
++{
++    extern uint32_t g_jp_smc;   /* attribution counter, newcpu.cpp */
++    int n;
++
++    g_jp_smc++;
++    psctrl_ctr_smc_hits++;
++    n = jit_demote_page(pg << PAGE_SHIFT);
++    if (n == 0)
++        psctrl_ctr_smc_stale++;
++    code_page[pg] = 0;
++}
++
+ static inline void pistorm_smc(uaecptr addr, int sz)
+ {
+     uae_u32 first_page, last_page;
+@@ -1165,14 +1213,13 @@ static inline void pistorm_smc(uaecptr addr, int sz)
+         return;
+ 
+     first_page = addr >> PAGE_SHIFT;
+-    if (code_page[first_page]) {
+-        cache_invalidate(); // coarse but correct; targeted later
+-        return;
+-    }
++    if (code_page[first_page])
++        pistorm_smc_page(first_page);
+ 
+     last_page = (addr + sz - 1) >> PAGE_SHIFT;
+-    if (last_page != first_page && code_page[last_page])
+-        cache_invalidate(); // coarse but correct; targeted later
++    if (last_page != first_page && last_page < (GUEST_RESERVE >> PAGE_SHIFT)
++        && code_page[last_page])
++        pistorm_smc_page(last_page);
+ }
+ 
+ extern "C" void pistorm_dma_from_stram(uint32_t addr, uint8_t *dst, uint32_t n)
+diff --git a/platforms/atari/psctrl/psctrl.cpp b/platforms/atari/psctrl/psctrl.cpp
+index d15f015..d9c4ea4 100644
+--- a/platforms/atari/psctrl/psctrl.cpp
++++ b/platforms/atari/psctrl/psctrl.cpp
+@@ -61,6 +61,8 @@ struct psctrl_snapshot {
+   volatile uint32_t jit_idle_x10;
+   volatile uint32_t flushes_total;
+   volatile uint32_t smc_inv;
++  volatile uint32_t smc_hits;
++  volatile uint32_t smc_stale;
+   volatile uint32_t pi_model;     /* static after init */
+   volatile uint32_t pi_ram_mb;    /* static after init */
+ };
+@@ -238,6 +240,16 @@ static void psctrl_sample_once(void)
+     g_snap.smc_inv = c - s_prev_smc_inv;
+     s_prev_smc_inv = c;
+   }
++  {
++    static uint32_t s_prev_smc_hits, s_prev_smc_stale;
++
++    c = psctrl_ctr_smc_hits;
++    g_snap.smc_hits = c - s_prev_smc_hits;
++    s_prev_smc_hits = c;
++    c = psctrl_ctr_smc_stale;
++    g_snap.smc_stale = c - s_prev_smc_stale;
++    s_prev_smc_stale = c;
++  }
+ 
+   /* since-boot cumulative for the JIT panel's cache-pressure line */
+   g_snap.flushes_total = psctrl_ctr_flushes;
+@@ -527,6 +539,10 @@ uint32_t psctrl_getint(uint32_t index)
+       return g_snap.flushes_total;
+     case PS_STAT_SMC_INV:
+       return g_snap.smc_inv;
++    case PS_STAT_SMC_HITS:
++      return g_snap.smc_hits;
++    case PS_STAT_SMC_STALE:
++      return g_snap.smc_stale;
+ 
+     /* Pi wall clock, computed on demand (the Pi is NTP-synced; the
+      * Atari has no battery RTC, so the guest can set its GEMDOS clock
+diff --git a/platforms/atari/psctrl/psctrl.h b/platforms/atari/psctrl/psctrl.h
+index 51a1760..be077a2 100644
+--- a/platforms/atari/psctrl/psctrl.h
++++ b/platforms/atari/psctrl/psctrl.h
+@@ -86,8 +86,18 @@ enum psctrl_stat_index {
+   PS_PI_RAM_MB          = 75,   /* board RAM, MB (256 << rev bits
+                                  * 20-22)                              */
+   PS_STAT_FLUSHES_TOTAL = 76,   /* hard cache flushes since boot       */
+-  PS_STAT_SMC_INV       = 77    /* blocks invalidated (self-modifying
++  PS_STAT_SMC_INV       = 77,   /* blocks invalidated (self-modifying
+                                  * code / checksum fail), last window  */
++  PS_STAT_SMC_HITS      = 78,   /* guest stores that landed on a page
++                                 * marked as compiled code, last window
++                                 * - each one demotes the blocks on
++                                 * that page to re-verify             */
++  PS_STAT_SMC_STALE     = 79    /* of those, stores where NO active
++                                 * block was on the page: the mark was
++                                 * left over from code long gone, and
++                                 * the page is now data. Before the
++                                 * targeted SMC each of these was a
++                                 * whole-cache lazy flush             */
+ };
+ 
+ /* Idempotent; spawns the sampler thread on first use (called lazily from
+@@ -107,6 +117,8 @@ extern volatile uint32_t psctrl_ctr_interp_calls;
+ extern volatile uint32_t psctrl_ctr_stop_iters;
+ extern volatile uint32_t psctrl_ctr_interp_cycles;	/* CYCLE_UNIT-weighted */
+ extern volatile uint32_t psctrl_ctr_smc_inv;	/* invalidate_block() calls */
++extern volatile uint32_t psctrl_ctr_smc_hits;	/* stores onto a code page (pistorm_natmem.cpp) */
++extern volatile uint32_t psctrl_ctr_smc_stale;	/* ...with no active block there */
+ 
+ /* Implemented in jit/arm/compemu_support_arm.cpp */
+ uint32_t psctrl_jit_cache_used(void);
+-- 
+2.43.0
+

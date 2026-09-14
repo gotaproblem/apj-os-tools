@@ -4,6 +4,6 @@ set -e
 cd "$(dirname "$0")"
 SKN=${1:-../../skins/out/FLTD175.SKN}
 cc -std=c89 -Wall -Wextra -Wno-unused-parameter -g -O1 \
-   -DAPJSKIN_HOST -I stub \
+   -DAPJSKIN_HOST -I stub -I ../../apjgui \
    -o harness harness.c ../../apjgui/apjskin.c ../../mp3gem/mp3ui.c -lm
 ./harness "$SKN" out.ppm

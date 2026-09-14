@@ -1,0 +1,947 @@
+From f3a58c27110a9e1d7e982d4069352d47baf9b7b0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 12 Sep 2026 22:49:58 +0000
+Subject: [PATCH 12/15] PSCTRL: the PISTORM_* tunables become live globals
+
+Twenty-odd knobs that were read once with getenv() are now plain aligned
+ints in platforms/atari/psctrl/psctrl_tunables.c, re-read where they are
+used. That is what lets the settings accessory change them on a running
+machine: a single 32-bit store is atomic on AArch64, so no reader needs a
+lock, no syscall happens, and nothing is added to core 3's admission
+budget - those loops already read globals.
+
+Precedence is unchanged in practice and now written down: built-in
+default, then the .cfg key, then the environment. psctrl_tunables_init()
+runs after the config load and only overrides what is actually set in the
+environment, so a PISTORM_* in an existing launch script still wins.
+
+Three behaviour changes, all deliberate:
+
+* One truth rule for the boolean flags. The tree had three - `== '1'`,
+  `non-empty && != "0"`, and bare presence - so PISTORM_ACSI_DEBUG=2
+  enabled the trace in acsi.c but not the one in atari_fdd.c, and
+  PISTORM_MFP_DEBUG=0 silenced mfp_trace() while leaving the REZ trace in
+  pistorm_natmem.cpp printing. Set is on, "0" is off, a number is that
+  number.
+
+* ipl_confirm_ticks and av4_refract_ticks were locals in ipl_task, which
+  spins on core 3 at SCHED_FIFO and must not divide. They are globals
+  now, and the ns -> tick conversion is done by the setter on the CPU
+  thread; ipl_task publishes cntfrq for it.
+
+* The ET4000 frame budget was a stack local set once, so fps needed a
+  restart. It is re-read every pass - one compare against a global - and
+  the guest-follow branch still wins when it is on.
+
+Two getenv() calls leave hot paths on the way: PISTORM_GEMDOS_DEBUG was
+read on every GEMDOS trap and PISTORM_NET_DEBUG on every frame.
+
+Also noted where it matters: PISTORM_BLIT_INSTANT never existed (a stale
+comment in st_blitter.c promises it) - instant is blit_timed_ns == 0; and
+the ST Box slice budget was the compile-time SLICE_CYC in guest cycles,
+not a nanosecond cap, so the control sets cycles.
+---
+ emulator.c                                  |  37 +++--
+ jit_glue.cpp                                |  13 +-
+ pistorm_natmem.cpp                          |  20 +--
+ platforms/atari/audio/dmasnd_hdmi.c         |  16 +-
+ platforms/atari/audio/ym2149.c              |  39 +++--
+ platforms/atari/et4000/et4000.c             |  20 ++-
+ platforms/atari/et4000/et4000_drm.c         |   4 +-
+ platforms/atari/fdd/acsi.c                  |   8 +-
+ platforms/atari/idedriver.c                 |   8 +-
+ platforms/atari/kbd_usb.c                   |  21 ++-
+ platforms/atari/mfp_hub.c                   |   8 +-
+ platforms/atari/network/pistorm_net.c       |   6 +-
+ platforms/atari/network/pistorm_net_slirp.c |   4 +-
+ platforms/atari/psctrl/psctrl_tunables.c    | 169 ++++++++++++++++++++
+ platforms/atari/psctrl/psctrl_tunables.h    | 103 ++++++++++++
+ platforms/atari/st_blitter.c                |  32 ++--
+ platforms/atari/stbox/stbox.c               |   7 +-
+ 17 files changed, 406 insertions(+), 109 deletions(-)
+ create mode 100644 platforms/atari/psctrl/psctrl_tunables.c
+ create mode 100644 platforms/atari/psctrl/psctrl_tunables.h
+
+diff --git a/emulator.c b/emulator.c
+index a6363c8..551f4d6 100755
+--- a/emulator.c
++++ b/emulator.c
+@@ -22,6 +22,7 @@
+ #include "platforms/atari/et4000/et4000.h"
+ // #include "platforms/atari/et4000/native_vga.h"
+ #include "config_file/config_file.h"
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include "gpio/ps_protocol.h"
+ #include "platforms/atari/audio/dmasnd.h"
+ #include "platforms/atari/machine_cookie.h"
+@@ -506,22 +507,23 @@ static void *ipl_task(void *)
+   uint64_t ipl_cand_tick = 0;           /* arch-timer stamp of candidate */
+   const char *ipl_raw_env = getenv("PISTORM_IPL_RAW");
+   const int ipl_raw = (ipl_raw_env && *ipl_raw_env == '1');
+-  uint64_t ipl_confirm_ticks;           /* persistence window, arch ticks */
++  /* ipl_confirm_ticks and av4_refract_ticks used to be locals computed
++   * once here. They are now published globals (psctrl_tunables), because
++   * this loop runs on core 3 at SCHED_FIFO and must not divide: the
++   * settings handler does the ns -> tick conversion on the CPU thread and
++   * stores the result, and this loop just reads it. */
++#define ipl_confirm_ticks  ((uint64_t)pst_ipl_confirm_ticks)
++#define av4_refract_ticks  ((uint64_t)pst_vbl_refract_ticks)
+   uint8_t  av_held = 0;                 /* autovector level already latched
+                                            this assertion episode (2/4)   */
+   uint64_t av4_last_tick = 0;           /* last level-4 latch (refractory) */
+-  uint64_t av4_refract_ticks;
+   {
+-    const char *e = getenv("PISTORM_IPL_CONFIRM_NS");
+-    const char *r = getenv("PISTORM_VBL_REFRACT_NS");
+-    uint64_t ns  = e ? strtoull(e, NULL, 10) : 2000;      /* default 2us */
+-    uint64_t rns = r ? strtoull(r, NULL, 10) : 5000000;   /* default 5ms */
+     uint64_t f;
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
+     if (!f)
+       f = 54000000ULL;                  /* Pi 4 arch-timer fallback */
+-    ipl_confirm_ticks = ns * f / 1000000000ULL;
+-    av4_refract_ticks = rns * f / 1000000000ULL;
++    psctrl_cntfrq = f;                  /* the setter needs it too */
++    psctrl_tunables_ipl_recalc();
+   }
+   bool seen_ipl6 = false;
+   unsigned no_ipl6_seconds = 0;
+@@ -1401,6 +1403,13 @@ int main (int argc, char *argv[])
+     return 1;
+   }
+   emulator_config_set_current(config);
++  /* Order matters: the .cfg has already set whatever tunables it named
++   * (load_config_file hands unknown keys to psctrl_settings_config_key),
++   * and this now lets a PISTORM_* in the launch script override it, which
++   * is the precedence people already have in their fingers. */
++  psctrl_tunables_init();
++  if (!pst_fps)
++    pst_fps = emulator_config_fps();
+   pistorm_set_blitter_mode(emulator_config_blitter_mode());
+ 
+   /*
+@@ -1629,12 +1638,14 @@ int main (int argc, char *argv[])
+     printf("[MAIN] IPL thread created successfully\n");
+   }
+ 
+-  /* PISTORM_IPL_STATS=1: one line per second of interrupt rates. Runs in
+-   * its own thread so nothing is printed from ipl_task, which spins on
+-   * cpu3 and must not syscall. Off unless the env var is set. */
++  /* One line per second of interrupt rates. Runs in its own thread so
++   * nothing is printed from ipl_task, which spins on cpu3 and must not
++   * syscall. Off unless the ipl flag is on (cfg `debug ipl`, the Debug
++   * tab, or PISTORM_IPL_STATS). The thread is only ever created here, so
++   * turning the flag on later needs a restart - the flag itself is
++   * checked once. */
+   {
+-    const char *e = getenv("PISTORM_IPL_STATS");
+-    if (e && *e == '1')
++    if (pst_dbg_ipl_stats)
+     {
+       pthread_t stats_tid;
+       if (pthread_create(&stats_tid, NULL, &ipl_stats_task, NULL) != 0)
+diff --git a/jit_glue.cpp b/jit_glue.cpp
+index 6858a6c..11da6e2 100755
+--- a/jit_glue.cpp
++++ b/jit_glue.cpp
+@@ -24,6 +24,7 @@
+ #include "sysconfig.h"
+ #include "sysdeps.h"
+ #include "options.h"
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include "memory.h"
+ #include "newcpu.h"
+ #include "uae.h" /* quit_program, UAE_RESET */
+@@ -310,12 +311,12 @@ extern "C" void jit_cpu_init(int cpu_level, int enable_fpu, int enable_ttram, in
+      * Default 1024 measured on HW: 68000 CoreMark 540->734 (~+36%), I/O clean,
+      * plateau ~2048; 1024 keeps ~98% of the gain with 2x the fallback margin.
+      * Watch for keyboard beep / erratic mouse = a break got delayed; back off. */
+-    {
+-        int pissoff_mult = 1024;
+-        const char *e = getenv("PISTORM_PISSOFF");
+-        if (e) { int v = atoi(e); if (v >= 1 && v <= 65536) pissoff_mult = v; }
+-        pissoff_value = currprefs.cachesize ? (pissoff_mult * CYCLE_UNIT) : 0;
+-    }
++    /* The multiplier now lives in psctrl_tunables (seeded from the .cfg
++     * key jit_power and then from PISTORM_PISSOFF, which still wins), so
++     * the settings accessory can move it on a running machine: every
++     * reload site in events.cpp reads pissoff_value, and writing it is a
++     * single aligned store. */
++    pissoff_value = currprefs.cachesize ? (pst_pissoff_mult * CYCLE_UNIT) : 0;
+     pissoff_nojit_value = 0;
+     pissoff = currprefs.cachesize ? pissoff_value : 0;
+     jit_n_addr_unsafe = 1;
+diff --git a/pistorm_natmem.cpp b/pistorm_natmem.cpp
+index 32fe774..5d55293 100755
+--- a/pistorm_natmem.cpp
++++ b/pistorm_natmem.cpp
+@@ -31,6 +31,7 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <time.h>
+ #include "platforms/atari/audio/dmasnd.h"
+ #include "platforms/atari/mfp_hub.h"
+@@ -475,12 +476,7 @@ static inline void stram_memcfg_snoop(uaecptr a, uae_u32 v, int size)
+          * "TOS wrote nothing" is exactly the distinction that matters
+          * (it is how the missing-snoop bug was found). Quiet by
+          * default; recfg below still logs actual changes. */
+-        static int dbg = -1;
+-        if (__builtin_expect(dbg < 0, 0)) {
+-            const char *e = getenv("PISTORM_STRAM_DEBUG");
+-            dbg = (e && *e == '1') ? 1 : 0;
+-        }
+-        if (dbg)
++        if (__builtin_expect(pst_dbg_stram != 0, 0))
+             fprintf(stderr, "[STRAM] guest memcfg write $%02X\n", mc);
+         stram_alias_recfg(mc);
+     }
+@@ -898,7 +894,9 @@ static void st_rez_sync_trace(uint32_t a, uint8_t v)
+      * built on a trace that could not print. Runtime-gated now; the
+      * writes are deduplicated above and number a handful per boot, so
+      * the gate is the only cost. */
+-    if (getenv("PISTORM_MFP_DEBUG")) {
++    /* Was a bare getenv() presence test, so PISTORM_MFP_DEBUG=0 silenced
++     * mfp_trace() below but left this one printing. One flag now. */
++    if (pst_dbg_mfp) {
+         clock_gettime(CLOCK_MONOTONIC, &ts);
+         fprintf(stderr, "[vid] t=%llu.%03llus %s write = 0x%02X pc=%08X%s  guest=%.1fHz\n",
+                 (unsigned long long)ts.tv_sec,
+@@ -2725,12 +2723,8 @@ static inline int kbd_acia_shadowed(uaecptr a)
+  * mechanism can be READ OFF rather than guessed at. */
+ static void mfp_trace(const char *op, uaecptr a, uae_u32 v, int words)
+ {
+-    static int on = -1, shown;
+-    if (on < 0) {
+-        const char *e = getenv("PISTORM_MFP_DEBUG");
+-        on = (e && *e && *e != '0') ? 1 : 0;
+-    }
+-    if (!on || shown >= 64)
++    static int shown;
++    if (!pst_dbg_mfp || shown >= 64)
+         return;
+     uae_u32 r = a & 0x00FFFFFFu;
+     if (r < 0x00FFFA01u || r > 0x00FFFA0Fu)
+diff --git a/platforms/atari/audio/dmasnd_hdmi.c b/platforms/atari/audio/dmasnd_hdmi.c
+index 8b6125c..95fa1e3 100755
+--- a/platforms/atari/audio/dmasnd_hdmi.c
++++ b/platforms/atari/audio/dmasnd_hdmi.c
+@@ -21,6 +21,7 @@
+ #include <stdatomic.h>
+ #include <stdint.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
+@@ -108,10 +109,12 @@ int dmasnd_init(const char *device)
+      * a late audio-thread wakeup no longer drains the device. Latency cost
+      * is inaudible for this use. PISTORM_AUDIO_FRAMES overrides (512-8192). */
+     {
+-        const char *f = getenv("PISTORM_AUDIO_FRAMES");
+-        int n = f ? atoi(f) : 2048;
+-        if (n < 512 || n > 8192) n = 2048;
++        /* SDL reads this at device open, so it is a boot-class setting
++         * however it is spelled - the accessory says "restart". */
++        int n = pst_audio_frames;
+         char buf[16];
++
++        if (n < 512 || n > 8192) n = 2048;
+         snprintf(buf, sizeof(buf), "%d", n);
+         SDL_SetHint("SDL_AUDIO_DEVICE_SAMPLE_FRAMES", buf);
+     }
+@@ -190,12 +193,7 @@ static int lmc_mixing = 1;              /* 1 = DMA + YM (what TOS programs) */
+ 
+ static int lmc_enabled(void)
+ {
+-    static int on = -1;
+-    if (on < 0) {
+-        const char *e = getenv("PISTORM_LMC");
+-        on = (e && *e == '0') ? 0 : 1;
+-    }
+-    return on;
++    return pst_lmc;                 /* live; see psctrl_tunables.h */
+ }
+ 
+ static float lmc_gain_db(float db) { return powf(10.0f, db / 20.0f); }
+diff --git a/platforms/atari/audio/ym2149.c b/platforms/atari/audio/ym2149.c
+index 638abb0..13752cd 100755
+--- a/platforms/atari/audio/ym2149.c
++++ b/platforms/atari/audio/ym2149.c
+@@ -44,6 +44,7 @@
+ #include <stdatomic.h>
+ #include <stdint.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <time.h>
+ 
+@@ -89,6 +90,28 @@ static FILE    *g_evlog = NULL;              /* applied register writes */
+ static uint64_t g_sample_idx = 0;            /* samples rendered so far */
+ typedef struct { uint64_t t, sample; uint8_t reg, val; uint16_t pad; } ym_evrec;
+ 
++static void ym_apply_gain(void);
++
++/*
++ * Both live knobs in one place, so the settings accessory can move them
++ * on a running machine: gain is a stream property SDL applies to the next
++ * buffer, and the lag is read by the render loop on its next pass.
++ */
++void ym2149_settings_changed(void)
++{
++    float gain = (float)pst_ym_gain_x100 / 100.0f;
++    long  ms   = pst_ym_lag_ms;
++
++    if (gain < 0.0f) gain = 0.0f;
++    if (gain > 4.0f) gain = 4.0f;
++    if (ms < 5)   ms = 5;
++    if (ms > 200) ms = 200;
++
++    g_user_gain = gain;
++    g_lag_ns    = (uint64_t)ms * 1000000ull;
++    ym_apply_gain();      /* folds in whatever the LMC shadow already holds */
++}
++
+ static void ym_apply_gain(void)
+ {
+     if (g_ym)
+@@ -273,14 +296,7 @@ int ym2149_init(void)
+         return -1;
+     }
+ 
+-    {   /* fixed trim (relative level vs the STE DMA stream) */
+-        const char *g = getenv("PISTORM_YM_GAIN");
+-        float gain = g ? (float)atof(g) : 1.0f;
+-        if (gain < 0.0f) gain = 0.0f;
+-        if (gain > 4.0f) gain = 4.0f;
+-        g_user_gain = gain;
+-        ym_apply_gain();      /* folds in whatever the LMC shadow already holds */
+-    }
++    ym2149_settings_changed();  /* gain and lag, from psctrl_tunables */
+     {
+         /* Default raised 20 -> 100ms. MEASURED (tap + evlog): SDL's pull
+          * cadence bursts up to ~25ms ahead of real time in a ~1Hz limit
+@@ -290,11 +306,8 @@ int ym2149_init(void)
+          * results: 50ms usable, 100ms clean. Cost is fixed audio
+          * latency, fine for music; PISTORM_YM_LAG_MS tunes it down for
+          * latency-sensitive use. */
+-        const char *l = getenv("PISTORM_YM_LAG_MS");
+-        long ms = l ? atol(l) : 100;
+-        if (ms < 5) ms = 5;
+-        if (ms > 200) ms = 200;
+-        g_lag_ns = (uint64_t)ms * 1000000ull;
++        /* set by ym2149_settings_changed() above; the comment stays here
++         * because this is where the measurement that chose 100 ms lives. */
+     }
+     {   /* diagnostic taps: big stdio buffers so the audio-thread fwrite is
+          * a memcpy; the kernel flush happens on fclose or buffer-full. At
+diff --git a/platforms/atari/et4000/et4000.c b/platforms/atari/et4000/et4000.c
+index ef4508c..34b9320 100755
+--- a/platforms/atari/et4000/et4000.c
++++ b/platforms/atari/et4000/et4000.c
+@@ -40,6 +40,7 @@
+ #include "../../../config_file/config_file.h"
+ 
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -1228,11 +1229,7 @@ static void sdl_present (ET4000State *s)
+              * would lose rects from skipped frames - force full then).
+              * PISTORM_DRM_DIRTYBAND=0 disables it entirely (full copy
+              * every present) as an A/B switch. */
+-            static int band_enabled = -1;
+-            if (band_enabled < 0) {
+-                const char *e = getenv("PISTORM_DRM_DIRTYBAND");
+-                band_enabled = (e && *e == '0') ? 0 : 1;
+-            }
++            const int band_enabled = pst_drm_dirtyband;   /* live */
+             uint32_t fy0 = 0, fy1 = sh ? sh - 1 : 0;
+             uint32_t fx0 = 0, fx1 = sw ? sw - 1 : 0;
+             int ffull = 1;
+@@ -2567,6 +2564,19 @@ void *render_frame(void *vptr)
+          * budget always, and the output refresh when the display offers a
+          * mode that fits. Opt-in, because a mode switch costs a visible
+          * resync and can drop HDMI audio on some sinks. */
++        /* The frame budget used to be a stack local set once, so changing
++         * fps needed a restart. Re-read it every pass: it is one compare
++         * against a global, and it is what makes the Video tab's slider
++         * do anything. The guest-follow branch below still wins when it
++         * is on, because it assigns FRAME_RATE after this. */
++        if (pst_fps >= 10 && pst_fps <= 60)
++        {
++            int want = 1000000 / pst_fps;
++
++            if (want != FRAME_RATE && !follow_guest_hz)
++                FRAME_RATE = want;
++        }
++
+         if (follow_guest_hz)
+         {
+             double hz = pistorm_guest_hz;
+diff --git a/platforms/atari/et4000/et4000_drm.c b/platforms/atari/et4000/et4000_drm.c
+index b7d8073..441803c 100755
+--- a/platforms/atari/et4000/et4000_drm.c
++++ b/platforms/atari/et4000/et4000_drm.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdint.h>
+ #include <string.h>
+ #include <errno.h>
+@@ -349,8 +350,7 @@ static void drmpres_drain_flip(void)
+  * leave g_async=0 and the caller keeps the blocking legacy path. */
+ static void drmpres_atomic_setup(void)
+ {
+-    const char *e = getenv("PISTORM_DRM_ASYNC");
+-    if (!(e && *e && strcmp(e, "0") != 0))
++    if (!pst_drm_async)
+         return;
+     if (drmSetClientCap(g_fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
+         fprintf(stderr, "[DRM] atomic cap unavailable; async present off\n");
+diff --git a/platforms/atari/fdd/acsi.c b/platforms/atari/fdd/acsi.c
+index 33e674a..167be41 100755
+--- a/platforms/atari/fdd/acsi.c
++++ b/platforms/atari/fdd/acsi.c
+@@ -13,6 +13,7 @@
+  */
+ 
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdint.h>
+ #include <stdbool.h>
+ #include <string.h>
+@@ -44,12 +45,7 @@ extern void     fdd_dma_copy_from_ram(uint32_t addr, uint8_t *buf,
+  * register writes. */
+ static int acsi_trace(void)
+ {
+-    static int on = -1;
+-    if (on < 0) {
+-        const char *e = getenv("PISTORM_ACSI_DEBUG");
+-        on = (e && *e && *e != '0') ? 1 : 0;
+-    }
+-    return on;
++    return pst_dbg_acsi;
+ }
+ 
+ /* ---- targets ----------------------------------------------------------- */
+diff --git a/platforms/atari/idedriver.c b/platforms/atari/idedriver.c
+index 2d45457..5bda617 100755
+--- a/platforms/atari/idedriver.c
++++ b/platforms/atari/idedriver.c
+@@ -20,6 +20,7 @@
+ #define _LARGEFILE64_SOURCE 
+ 
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdint.h>
+ #include <unistd.h>
+ #include <string.h>
+@@ -160,12 +161,7 @@ static void ide_fault ( struct ide_drive *d, const char *p )
+    * course - so every boot printed dozens of "ide: cf: 1: not present"
+    * / "bogus register" lines while IDE worked perfectly. Faults that
+    * matter when bringing up a NEW driver are one env var away. */
+-  static int on = -1;
+-  if (on < 0) {
+-    const char *e = getenv("PISTORM_IDE_DEBUG");
+-    on = (e && *e && *e != '0') ? 1 : 0;
+-  }
+-  if (on)
++  if (pst_dbg_ide)
+     printf ( "ide: %s: %d: %s\n", d->controller->name,
+ 			(int)(d - d->controller->drive), p );
+ }
+diff --git a/platforms/atari/kbd_usb.c b/platforms/atari/kbd_usb.c
+index f3d29ea..936ba62 100755
+--- a/platforms/atari/kbd_usb.c
++++ b/platforms/atari/kbd_usb.c
+@@ -26,6 +26,7 @@
+  */
+ 
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdatomic.h>
+@@ -360,14 +361,11 @@ static int      nat_mouse_rel = 1;      /* IKBD powers up relative      */
+ 
+ static void mouse_cfg_init(void)
+ {
+-    const char *e = getenv("PISTORM_MOUSE_THRESH");
+-
+-    mouse_thresh = (e && *e) ? atoi(e) : 0;
++    mouse_thresh = pst_mouse_thresh;
+     if (mouse_thresh < 0)  mouse_thresh = 0;
+     if (mouse_thresh > 15) mouse_thresh = 15;
+ 
+-    e = getenv("PISTORM_MOUSE_SCALE");
+-    mouse_scale = (e && *e) ? atoi(e) : 1;
++    mouse_scale = pst_mouse_scale;
+     if (mouse_scale < 1)  mouse_scale = 1;
+     if (mouse_scale > 16) mouse_scale = 16;
+ 
+@@ -376,6 +374,19 @@ static void mouse_cfg_init(void)
+                mouse_thresh, mouse_scale);
+ }
+ 
++static void mouse_thresh_arm(uint64_t delay_us);
++
++/*
++ * The settings accessory changed pst_mouse_thresh / _scale. The scale is
++ * read on every packet so it takes at once; the threshold is a command
++ * the real IKBD has to be told about, so re-arm the 0x0B.
++ */
++void kbd_usb_mouse_cfg_changed(void)
++{
++    mouse_cfg_init();
++    mouse_thresh_arm(50000);
++}
++
+ /* Queue "0x0B thresh thresh" to the real IKBD, not before now+delay -
+  * after a reset the controller needs time before it will listen. */
+ static void mouse_thresh_arm(uint64_t delay_us)
+diff --git a/platforms/atari/mfp_hub.c b/platforms/atari/mfp_hub.c
+index 72d237a..ae0a487 100644
+--- a/platforms/atari/mfp_hub.c
++++ b/platforms/atari/mfp_hub.c
+@@ -13,18 +13,14 @@
+ 
+ #include <stdatomic.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ 
+ /* PISTORM_MFP_HUB_DEBUG=1: budgeted trace of raises/IACKs/EOIs plus a
+  * once-per-1024-arbitrations state line. Free when off (cached getenv). */
+ static int hub_dbg(void)
+ {
+-    static int v = -1;
+-    if (v < 0) {
+-        const char *e = getenv("PISTORM_MFP_HUB_DEBUG");
+-        v = (e && *e == '1') ? 1 : 0;
+-    }
+-    return v;
++    return pst_dbg_mfp_hub;         /* live; see psctrl_tunables.h */
+ }
+ 
+ /* ---- register shadows (guest-programmed) ------------------------------ */
+diff --git a/platforms/atari/network/pistorm_net.c b/platforms/atari/network/pistorm_net.c
+index 4d7cdb6..f408cf8 100755
+--- a/platforms/atari/network/pistorm_net.c
++++ b/platforms/atari/network/pistorm_net.c
+@@ -5,6 +5,7 @@
+ 
+ #include <pthread.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -40,9 +41,8 @@ static pistorm_net_state_t g_net = {
+ static void pnet_trace_frame(const char *prefix, const uint8_t *frame, size_t len)
+ {
+   uint16_t type = len >= 14 ? ((uint16_t)frame[12] << 8) | frame[13] : 0;
+-  const char *debug = getenv("PISTORM_NET_DEBUG");
+-
+-  if (!debug || !debug[0] || strcmp(debug, "0") == 0)
++  /* Was an uncached getenv() on the per-frame path. */
++  if (!pst_dbg_net)
+     return;
+ 
+   fprintf(stderr,
+diff --git a/platforms/atari/network/pistorm_net_slirp.c b/platforms/atari/network/pistorm_net_slirp.c
+index 5f02b32..9d47914 100755
+--- a/platforms/atari/network/pistorm_net_slirp.c
++++ b/platforms/atari/network/pistorm_net_slirp.c
+@@ -7,6 +7,7 @@
+ #include <pthread.h>
+ #include <stdint.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
+@@ -30,8 +31,7 @@
+ #if defined(HAVE_LIBSLIRP)
+ static int pnet_slirp_debug_enabled(void)
+ {
+-  const char *debug = getenv("PISTORM_NET_DEBUG");
+-  return debug && debug[0] && strcmp(debug, "0") != 0;
++  return pst_dbg_net;
+ }
+ 
+ typedef struct pnet_slirp_timer {
+diff --git a/platforms/atari/psctrl/psctrl_tunables.c b/platforms/atari/psctrl/psctrl_tunables.c
+new file mode 100644
+index 0000000..278d008
+--- /dev/null
++++ b/platforms/atari/psctrl/psctrl_tunables.c
+@@ -0,0 +1,169 @@
++// SPDX-License-Identifier: MIT
++//
++// PSCTRL tunables — see psctrl_tunables.h.
++//
++// One place where the environment is read, once, at startup. Everything
++// after that goes through the settings descriptor table.
++
++#include "platforms/atari/psctrl/psctrl_tunables.h"
++
++#include <stdlib.h>
++#include <stdio.h>
++
++/* --- storage -------------------------------------------------------- */
++
++volatile int pst_pissoff_mult    = 1024;
++
++volatile int pst_fps             = 0;      /* 0 = follow the .cfg          */
++volatile int pst_drm_dirtyband   = 1;
++volatile int pst_drm_async       = 0;
++
++volatile int pst_blit_timed_ns   = 0;
++
++volatile int pst_ym_gain_x100    = 100;
++volatile int pst_ym_lag_ms       = 100;
++volatile int pst_lmc             = 1;
++volatile int pst_audio_frames    = 2048;
++
++volatile int pst_mouse_thresh    = 0;
++volatile int pst_mouse_scale     = 1;
++
++volatile int pst_stbox_slice_cyc = 64;
++volatile int pst_stbox_telemetry = 0;
++
++volatile int pst_ipl_confirm_ns  = 2000;
++volatile int pst_vbl_refract_ns  = 5000000;
++volatile uint64_t pst_ipl_confirm_ticks = 0;
++volatile uint64_t pst_vbl_refract_ticks = 0;
++volatile uint64_t psctrl_cntfrq         = 0;
++
++volatile int pst_dbg_ipl_stats   = 0;
++volatile int pst_dbg_irq_stats   = 0;
++volatile int pst_dbg_mfp         = 0;
++volatile int pst_dbg_mfp_hub     = 0;
++volatile int pst_dbg_blit_trace  = 0;
++volatile int pst_dbg_dmasnd      = 0;
++volatile int pst_dbg_acsi        = 0;
++volatile int pst_dbg_ide         = 0;
++volatile int pst_dbg_hostfs      = -1;
++volatile int pst_dbg_gemdos      = 0;
++volatile int pst_dbg_stram       = 0;
++volatile int pst_dbg_net         = 0;
++
++/* --- reading the environment ---------------------------------------- */
++
++/* The tree had three different truth rules for its boolean env vars:
++ * `== '1'`, `non-empty && != "0"`, and bare presence. PISTORM_ACSI_DEBUG=2
++ * enabled the debug print in acsi.c but not the one in atari_fdd.c, and
++ * PISTORM_MFP_DEBUG=0 silenced mfp_trace() while still enabling the REZ
++ * trace in pistorm_natmem.cpp. Collapsing them onto one rule here is a
++ * deliberate behaviour change, and the rule is the forgiving one: set is
++ * on, "0" is off, a number is that number. */
++static int env_int(const char *name, int dflt, int lo, int hi)
++{
++  const char *e = getenv(name);
++  long v;
++  char *end = NULL;
++
++  if (!e || !*e)
++    return dflt;
++  v = strtol(e, &end, 0);
++  if (end == e)
++    return dflt;                    /* not a number: leave the default */
++  if (v < lo) v = lo;
++  if (v > hi) v = hi;
++  return (int)v;
++}
++
++static int env_bool(const char *name, int dflt)
++{
++  const char *e = getenv(name);
++
++  if (!e)
++    return dflt;
++  if (!*e)
++    return 1;                       /* bare presence = on */
++  return (e[0] == '0' && e[1] == '\0') ? 0 : 1;
++}
++
++static int env_gain_x100(const char *name, int dflt)
++{
++  const char *e = getenv(name);
++  double d;
++  char *end = NULL;
++
++  if (!e || !*e)
++    return dflt;
++  d = strtod(e, &end);
++  if (end == e)
++    return dflt;
++  if (d < 0.0) d = 0.0;
++  if (d > 4.0) d = 4.0;
++  return (int)(d * 100.0 + 0.5);
++}
++
++void psctrl_tunables_ipl_recalc(void)
++{
++  uint64_t f = psctrl_cntfrq;
++
++  if (!f)
++    f = 54000000ULL;                /* Pi 4 arch-timer fallback */
++
++  pst_ipl_confirm_ticks = (uint64_t)pst_ipl_confirm_ns * f / 1000000000ULL;
++  pst_vbl_refract_ticks = (uint64_t)pst_vbl_refract_ns * f / 1000000000ULL;
++}
++
++void psctrl_tunables_init(void)
++{
++  static int done = 0;
++
++  if (done)
++    return;
++  done = 1;
++
++  /* Called AFTER the config file is parsed, and every default below is
++   * the value already in the global. So the precedence is: built-in
++   * default, then the .cfg key, then the environment - which keeps a
++   * PISTORM_* in an existing launch script winning, the way it does
++   * today, while making the .cfg the place these actually live. */
++
++  pst_pissoff_mult   = env_int ("PISTORM_PISSOFF",         pst_pissoff_mult, 1, 65536);
++
++  pst_drm_dirtyband  = env_bool("PISTORM_DRM_DIRTYBAND",   pst_drm_dirtyband);
++  pst_drm_async      = env_bool("PISTORM_DRM_ASYNC",       pst_drm_async);
++
++  pst_blit_timed_ns  = env_int ("PISTORM_BLIT_TIMED_NS",   pst_blit_timed_ns, 0, 100000);
++
++  pst_ym_gain_x100   = env_gain_x100("PISTORM_YM_GAIN",    pst_ym_gain_x100);
++  pst_ym_lag_ms      = env_int ("PISTORM_YM_LAG_MS",       pst_ym_lag_ms, 5, 200);
++  pst_lmc            = env_bool("PISTORM_LMC",             pst_lmc);
++  pst_audio_frames   = env_int ("PISTORM_AUDIO_FRAMES",    pst_audio_frames, 512, 8192);
++
++  pst_mouse_thresh   = env_int ("PISTORM_MOUSE_THRESH",    pst_mouse_thresh, 0, 15);
++  pst_mouse_scale    = env_int ("PISTORM_MOUSE_SCALE",     pst_mouse_scale, 1, 16);
++
++  pst_stbox_slice_cyc = env_int("PISTORM_STBOX_SLICE_CYC", pst_stbox_slice_cyc, 8, 4096);
++  pst_stbox_telemetry = env_bool("PISTORM_STBOX_DBG",      pst_stbox_telemetry);
++
++  pst_ipl_confirm_ns = env_int ("PISTORM_IPL_CONFIRM_NS",  pst_ipl_confirm_ns, 0, 1000000);
++  pst_vbl_refract_ns = env_int ("PISTORM_VBL_REFRACT_NS",  pst_vbl_refract_ns, 0, 200000000);
++  psctrl_tunables_ipl_recalc();
++
++  pst_dbg_ipl_stats  = env_bool("PISTORM_IPL_STATS",       pst_dbg_ipl_stats);
++  pst_dbg_irq_stats  = env_bool("PISTORM_IRQ_STATS",       pst_dbg_irq_stats);
++  pst_dbg_mfp        = env_bool("PISTORM_MFP_DEBUG",       pst_dbg_mfp);
++  pst_dbg_mfp_hub    = env_bool("PISTORM_MFP_HUB_DEBUG",   pst_dbg_mfp_hub);
++  pst_dbg_blit_trace = env_int ("PISTORM_BLIT_TRACE",      pst_dbg_blit_trace, 0, 1000000);
++  pst_dbg_dmasnd     = env_int ("PISTORM_DMASND_DEBUG",    pst_dbg_dmasnd, 0, 2);
++  pst_dbg_acsi       = env_bool("PISTORM_ACSI_DEBUG",      pst_dbg_acsi);
++  pst_dbg_ide        = env_bool("PISTORM_IDE_DEBUG",       pst_dbg_ide);
++  pst_dbg_gemdos     = env_bool("PISTORM_GEMDOS_DEBUG",    pst_dbg_gemdos);
++  pst_dbg_stram      = env_bool("PISTORM_STRAM_DEBUG",     pst_dbg_stram);
++  pst_dbg_net        = env_bool("PISTORM_NET_DEBUG",       pst_dbg_net);
++
++  /* HOSTFS debug is three-valued: -1 means "whatever the cfg's own hostfs
++   * debug flag says", which is how hostfs_debug_enabled() has always
++   * behaved when the variable was unset. */
++  if (getenv("PISTORM_HOSTFS_DEBUG"))
++    pst_dbg_hostfs = env_bool("PISTORM_HOSTFS_DEBUG", 0);
++}
+diff --git a/platforms/atari/psctrl/psctrl_tunables.h b/platforms/atari/psctrl/psctrl_tunables.h
+new file mode 100644
+index 0000000..8bf5e00
+--- /dev/null
++++ b/platforms/atari/psctrl/psctrl_tunables.h
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: MIT
++//
++// PSCTRL tunables — the knobs that used to be getenv("PISTORM_*") calls.
++//
++// Every one of these is a plain aligned int that the emulator re-reads
++// where it uses it, so a single 32-bit store from the PSCTRL NatFeat
++// handler (which runs on the CPU thread, cores 0-2) is all it takes to
++// change the running machine. That store is atomic on AArch64, so the
++// readers - including ipl_task on core 3 and the ET4000 render thread -
++// need no lock and no syscall, and nothing is added to the admission
++// budget: those loops already read globals.
++//
++// psctrl_tunables_init() is called once from main() BEFORE any consumer
++// runs, and seeds every value from the environment so that an existing
++// PISTORM_* in a launch script keeps working exactly as it did. After
++// that the environment is never consulted again: the settings dialog and
++// the .cfg are the only writers. This is the "retiring the env vars" step
++// of psctrl-live-settings-design.md - the variable names below are the
++// .cfg keys the writer emits.
++//
++// Two of the values here are not read directly by their consumer but are
++// pre-converted for it. ipl_task spins on core 3 at SCHED_FIFO and must
++// not divide: it reads *_ticks, and the setter (on the CPU thread) does
++// the ns -> arch-timer-tick conversion using the frequency ipl_task
++// published in psctrl_cntfrq. Writing the ns value alone would do
++// nothing; psctrl_tunables_ipl_recalc() is what makes it take.
++
++#ifndef PSCTRL_TUNABLES_H
++#define PSCTRL_TUNABLES_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* --- JIT ---------------------------------------------------------- */
++/* Compiled-chain budget as a multiple of CYCLE_UNIT. jit_glue.cpp turns
++ * this into pissoff_value; the dialog's "jit_power" 1..6 is 256 << (n-1). */
++extern volatile int pst_pissoff_mult;
++
++/* --- video -------------------------------------------------------- */
++extern volatile int pst_fps;              /* 10..60, host present pace   */
++extern volatile int pst_drm_dirtyband;    /* 0/1                          */
++extern volatile int pst_drm_async;        /* 0/1, boot only               */
++
++/* --- blitter ------------------------------------------------------- */
++/* ns per bus access; 0 = instant. There is no separate "instant" switch:
++ * the design doc's PISTORM_BLIT_INSTANT never existed (a stale comment in
++ * st_blitter.c promises it), and instant is simply 0 here. */
++extern volatile int pst_blit_timed_ns;
++
++/* --- audio --------------------------------------------------------- */
++extern volatile int pst_ym_gain_x100;     /* 0..400, hundredths of unity  */
++extern volatile int pst_ym_lag_ms;        /* 5..200                       */
++extern volatile int pst_lmc;              /* 0/1 LMC1992 shadow           */
++extern volatile int pst_audio_frames;     /* 512..8192, boot only         */
++
++/* --- input --------------------------------------------------------- */
++extern volatile int pst_mouse_thresh;     /* 0..15, 0 = off               */
++extern volatile int pst_mouse_scale;      /* 1..16                        */
++
++/* --- ST Box -------------------------------------------------------- */
++/* Guest cycles per admission slice. Was the compile-time SLICE_CYC; the
++ * design doc calls this a nanosecond cap, but the slice loop counts guest
++ * cycles and converting per pass would cost a divide on core 3, so the
++ * control is in cycles and the dialog prints the ~ns beside it. */
++extern volatile int pst_stbox_slice_cyc;
++extern volatile int pst_stbox_telemetry;  /* 0/1                          */
++
++/* --- IPL / interrupt timing (core 3 reads the tick forms) ---------- */
++extern volatile int pst_ipl_confirm_ns;
++extern volatile int pst_vbl_refract_ns;
++extern volatile uint64_t pst_ipl_confirm_ticks;
++extern volatile uint64_t pst_vbl_refract_ticks;
++extern volatile uint64_t psctrl_cntfrq;   /* published by ipl_task        */
++
++/* Recompute the tick forms from the ns forms. Called by the settings
++ * handler after either ns value changes, and by ipl_task once it knows
++ * cntfrq. Safe to call from any thread: it only stores. */
++void psctrl_tunables_ipl_recalc(void);
++
++/* --- debug / trace flags ------------------------------------------- */
++extern volatile int pst_dbg_ipl_stats;
++extern volatile int pst_dbg_irq_stats;
++extern volatile int pst_dbg_mfp;
++extern volatile int pst_dbg_mfp_hub;
++extern volatile int pst_dbg_blit_trace;   /* a budget of blits, not a flag */
++extern volatile int pst_dbg_dmasnd;       /* 0 off, 1 verbose, 2 summary   */
++extern volatile int pst_dbg_acsi;
++extern volatile int pst_dbg_ide;
++extern volatile int pst_dbg_hostfs;       /* -1 = follow the cfg           */
++extern volatile int pst_dbg_gemdos;
++extern volatile int pst_dbg_stram;
++extern volatile int pst_dbg_net;
++
++void psctrl_tunables_init(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* PSCTRL_TUNABLES_H */
+diff --git a/platforms/atari/st_blitter.c b/platforms/atari/st_blitter.c
+index 33621f3..11af912 100755
+--- a/platforms/atari/st_blitter.c
++++ b/platforms/atari/st_blitter.c
+@@ -33,6 +33,7 @@
+ 
+ #include <stdint.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -63,16 +64,14 @@ static uint64_t blit_now_ns(void)
+ 
+ static int blit_timing_cfg(void)   /* 0 = instant, else ns per bus access */
+ {
+-    static int ns = -1;
+-    if (ns < 0)
+-    {
+-        /* default: instant (blitter data + busy both immediate). Timed BUSY
+-         * is opt-in via PISTORM_BLIT_TIMED_NS=<ns per bus access> (500 =
+-         * realistic STE) for software that paces itself on blitter speed. */
+-        const char *n = getenv("PISTORM_BLIT_TIMED_NS");
+-        ns = n ? atoi(n) : 0;
+-        if (ns < 0 || ns > 100000) ns = 0;
+-    }
++    /* Live, re-read per blit: the settings accessory moves it while a
++     * program is running, which is the only way to tell whether a game
++     * paces itself on blitter speed. Default is still instant (0); 500 is
++     * a realistic STE. Note that PISTORM_BLIT_INSTANT, promised by the
++     * comment at the top of this file, never existed - instant is 0. */
++    int ns = pst_blit_timed_ns;
++
++    if (ns < 0 || ns > 100000) ns = 0;
+     return ns;
+ }
+ 
+@@ -175,16 +174,11 @@ static void blit_run(void)
+         xc = 65536;
+     g_accesses = 0;
+ 
+-    {   /* PISTORM_BLIT_TRACE=N traces the first N blits to stderr */
+-        static int trace_left = -1;
+-        if (trace_left < 0)
+-        {
+-            const char *e = getenv("PISTORM_BLIT_TRACE");
+-            trace_left = e ? atoi(e) : 0;
+-        }
+-        if (trace_left > 0)
++    {   /* blit_trace is a budget of blits to trace, not a flag: the
++         * accessory re-arms it by setting it again. */
++        if (pst_dbg_blit_trace > 0)
+         {
+-            trace_left--;
++            pst_dbg_blit_trace--;
+             fprintf(stderr,
+                 "[BLIT] src=%06X sxi=%d syi=%d dst=%06X dxi=%d dyi=%d "
+                 "xc=%u yc=%u hop=%d op=%d skew=%d fx=%d nf=%d sm=%d "
+diff --git a/platforms/atari/stbox/stbox.c b/platforms/atari/stbox/stbox.c
+index 6a8c6b9..beb904c 100755
+--- a/platforms/atari/stbox/stbox.c
++++ b/platforms/atari/stbox/stbox.c
+@@ -18,6 +18,7 @@
+ #include <stdint.h>
+ #include <string.h>
+ #include <stdio.h>
++#include "platforms/atari/psctrl/psctrl_tunables.h"
+ #include "stbox.h"
+ #include "../../../third_party/musashi/m68k.h"
+ 
+@@ -35,7 +36,11 @@
+  * of host work on a Pi 4 core - inside the housekeeping admission rule. A
+  * single long instruction (DIVS, MOVEM) may overshoot; Musashi stops at the
+  * first boundary past the budget and the debt carries. */
+-#define SLICE_CYC      64
++/* Live, from the ST Box tab. Was a compile-time 64. The dialog shows the
++ * approximate host cost beside it; the loop counts GUEST cycles, and
++ * converting a nanosecond cap per pass would put a divide in the
++ * admission path, so cycles is what the control sets. */
++#define SLICE_CYC      ((int)pst_stbox_slice_cyc)
+ /* If the box falls behind (host stall, heavy IPL traffic), never try to
+  * catch up more than one frame - drop the debt instead of marathoning. */
+ #define MAX_DEBT_CYC   CYC_PER_VBL
+-- 
+2.43.0
+
