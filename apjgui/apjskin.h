@@ -57,6 +57,11 @@ enum
 	APJ_RG_POPUP,		/* enum popup plate, 4 states, chevron baked right */
 	APJ_RG_STATUS,		/* status strip ground, tiled across               */
 	APJ_RG_CHEV,		/* the popup's arrow, 4 states to match the plate  */
+	/* --- sheet version 3, for PDFGEM: the ten toolbar tiles, glyphs
+	 * APJ_G_PGPREV..APJ_G_ROTATE x 4 states, the TILE recipe. Absent on
+	 * an older sheet, and apj_skin_tile() then draws nothing for those
+	 * glyphs - the app must ask apj_skin_has_tile() and fall back. --- */
+	APJ_RG_TILE2,
 	APJ_RG_N
 };
 
@@ -68,11 +73,17 @@ enum
 	APJ_G_VOL, APJ_G_VOLLOW, APJ_G_MUTE, APJ_G_OPEN, APJ_G_LIST,
 	APJ_G_FULL, APJ_G_UNFULL, APJ_G_EJECT, APJ_G_INFO,
 	APJ_G_AUDIO, APJ_G_VIDEO, APJ_G_MIN, APJ_G_MAX, APJ_G_CLOSE,
+	/* sheet version 3 (PDFGEM) */
+	APJ_G_PGPREV, APJ_G_PGNEXT, APJ_G_ZOOMOUT, APJ_G_ZOOMIN,
+	APJ_G_FITW, APJ_G_FITP, APJ_G_SEARCH, APJ_G_FINDPREV, APJ_G_FINDNEXT,
+	APJ_G_ROTATE,
 	APJ_G_N
 };
 
 #define APJ_G_NTILE	19	/* glyphs 0..18 have a TILE    */
 #define APJ_G_NACC	5	/* glyphs 0..4  have a TILEACC */
+#define APJ_G_TILE2_FIRST	APJ_G_PGPREV	/* ...and 24..33 a TILE2 */
+#define APJ_G_NTILE2	10
 
 /* --------------------------------------------------------- states etc -- */
 enum { APJ_ST_NORM, APJ_ST_HOVER, APJ_ST_PRESS, APJ_ST_ON, APJ_ST_N };
@@ -162,7 +173,9 @@ void  apj_skin_9    (short vh, short rid, short state,
                      short x, short y, short w, short h);
 void  apj_skin_tilex(short vh, short rid, short state,
                      short x, short y, short w);
+/* a TILE for glyphs 0..18, a TILE2 for 24..33; nothing for the rest */
 void  apj_skin_tile   (short vh, short g, short state, short x, short y);
+short apj_skin_has_tile(short g);		/* 1 if this sheet can draw it */
 void  apj_skin_tileacc(short vh, short g, short state, short x, short y);
 void  apj_skin_glyph  (short vh, short g, short pen, short x, short y);
 

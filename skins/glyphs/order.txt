@@ -25,3 +25,14 @@ VIDEO
 MIN
 MAX
 CLOSE
+# --- sheet version 3: the PDFGEM toolbar. These ten get a TILE2, in this order.
+PGPREV
+PGNEXT
+ZOOMOUT
+ZOOMIN
+FITW
+FITP
+SEARCH
+FINDPREV
+FINDNEXT
+ROTATE

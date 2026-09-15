@@ -683,14 +683,20 @@ static void play_path(const char *arg)
 
 /*
  * Keys 1, 2 and 3 pick the 100, 125 or 175 percent sheet, 0 goes back to
- * the screen's choice; kept in VIDGEM.INF next to the .PRG as scale=NNN.
+ * the screen's choice; kept in <boot>:\VIDGEM.INF as scale=NNN.
  */
+/* The .PRG lives on the read-only HOSTFS share, so the .INF goes to the
+ * root of the boot drive (_bootdev at $446; C: if that looks wrong). */
+static long boot_drive_sv(void) { return *(volatile short *)0x446L; }
+
 static void inf_path(char *out, long n)
 {
-    char pd[192];
+    long d = Supexec(boot_drive_sv);
 
-    apj_skin_progdir(pd, (long)sizeof pd);
-    sprintf(out, "%.*sVIDGEM.INF", (int)(n - 12), pd);
+    if (d < 0 || d > 25)
+        d = 2;                              /* C: */
+    sprintf(out, "%c:\\VIDGEM.INF", (char)('A' + d));
+    (void)n;
 }
 
 static short inf_scale(void)

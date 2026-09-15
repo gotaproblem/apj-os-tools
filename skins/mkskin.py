@@ -19,8 +19,12 @@ Requires: python3, cairosvg, Pillow  (same as icons/mkicons.py)
 """
 import io, json, os, struct, sys
 
-import cairosvg
 from PIL import Image, ImageDraw
+try:
+    import cairosvg
+except ImportError:             # no cairosvg: librsvg + cairo through ctypes
+    cairosvg = None
+    from svgraster import coverage as _rsvg_coverage
 
 SS = 4                      # supersampling factor for the vector-ish art
 
@@ -37,16 +41,19 @@ F_TILEX, F_TILEY, F_SLICE9 = 1, 2, 4
 RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE, \
 RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL, \
 RG_TAB, RG_TABBAR, RG_RADIO, RG_CHECK, RG_FIELD, RG_POPUP, RG_STATUS, \
-RG_CHEV = range(20)
-RG_N = 20
+RG_CHEV, RG_TILE2 = range(21)
+RG_N = 21
 RG_NAME = ["PANELTOP","GROUP","ROWSEL","SEEK","KNOB","BADGE",
            "ARTPH","BTN","BTNACC","TILE","TILEACC","VSCROLL",
-           "TAB","TABBAR","RADIO","CHECK","FIELD","POPUP","STATUS","CHEV"]
+           "TAB","TABBAR","RADIO","CHECK","FIELD","POPUP","STATUS","CHEV",
+           "TILE2"]
 
 # Sheet version. 1 = the twelve media-player regions; 2 adds the seven
-# above for PSCTRL. apjskin.c loads either and marks the missing ones
-# absent, so an app built against 19 still runs on a 12-region sheet.
-SKN_VERSION = 2
+# above for PSCTRL; 3 adds TILE2, the PDFGEM toolbar tiles (glyphs 24..33,
+# the same recipe as TILE). apjskin.c loads any of them and marks the
+# missing regions absent, so an app built against 21 still runs on a
+# 12-region sheet.
+SKN_VERSION = 3
 
 # Metrics the PSCTRL widgets need. Kept here rather than in every token
 # file so an existing skin JSON still builds; a token file that names one
@@ -64,6 +71,8 @@ DEFAULT_METRICS = {
 
 NBTNGLYPH = 19              # glyphs 0..18 get a TILE
 NACCGLYPH = 5               # glyphs 0..4 get a TILEACC
+TILE2_FIRST = 24            # glyphs 24..33 get a TILE2 (sheet version 3)
+NTILE2 = 10
 NSTATE    = 4               # normal, hover, pressed, on/disabled
 
 # --------------------------------------------------------------- colour --
@@ -139,6 +148,8 @@ def load_glyphs(gdir):
 
 def raster(path, size):
     """SVG -> 8-bit coverage map at size x size"""
+    if cairosvg is None:
+        return _rsvg_coverage(path, size)
     png = cairosvg.svg2png(url=path, output_width=size, output_height=size)
     return Image.open(io.BytesIO(png)).convert("RGBA").split()[3]
 
@@ -289,22 +300,28 @@ def build(skin, scale, gnames, gfiles):
 
     # --- 9 TILE: plate + glyph, pre-composited ----------------------------
     gcov = [raster(f, gsz) for f in gfiles]
-    tiles = []
     gx, gy = (tw - gsz) // 2, (th - gsz) // 2
-    for gi in range(NBTNGLYPH):
-        for st in range(NSTATE):
-            a = Art(tw, th, C["PANEL"])
-            r = M["radius_btn"]
-            if st == 1:
-                a.rrect(0, 0, tw, th, r, fill=C["HOVER"], outline=hair, width=M["border"])
-            elif st == 2:
-                a.rrect(0, 0, tw, th, r, fill=C["PRESSED"], outline=C["BORDER"], width=M["border"])
-            elif st == 3:
-                a.rrect(0, 0, tw, th, r, fill=C["HOVER"], outline=hair, width=M["border"])
-            ink = C["ACCENT"] if st == 3 else C["TEXT"]
-            a.paste(tinted(gcov[gi], ink), gx, gy)
-            tiles.append(a.finish())
-    parts[RG_TILE] = tiles
+
+    def tile_of(gi, st):
+        a = Art(tw, th, C["PANEL"])
+        r = M["radius_btn"]
+        if st == 1:
+            a.rrect(0, 0, tw, th, r, fill=C["HOVER"], outline=hair, width=M["border"])
+        elif st == 2:
+            a.rrect(0, 0, tw, th, r, fill=C["PRESSED"], outline=C["BORDER"], width=M["border"])
+        elif st == 3:
+            a.rrect(0, 0, tw, th, r, fill=C["HOVER"], outline=hair, width=M["border"])
+        ink = C["ACCENT"] if st == 3 else C["TEXT"]
+        a.paste(tinted(gcov[gi], ink), gx, gy)
+        return a.finish()
+
+    parts[RG_TILE] = [tile_of(gi, st) for gi in range(NBTNGLYPH) for st in range(NSTATE)]
+
+    # --- 20 TILE2: the PDFGEM toolbar, same recipe (sheet version 3) --------
+    if len(gcov) < TILE2_FIRST + NTILE2:
+        sys.exit("order.txt needs %d glyphs for TILE2, has %d" % (TILE2_FIRST + NTILE2, len(gcov)))
+    parts[RG_TILE2] = [tile_of(gi, st) for gi in range(TILE2_FIRST, TILE2_FIRST + NTILE2)
+                       for st in range(NSTATE)]
 
     # --- 10 TILEACC: round accent button with its glyph -------------------
     acov = [raster(f, max(4, int(round(gsz * 1.2)))) for f in gfiles[:NACCGLYPH]]
@@ -501,6 +518,7 @@ def build(skin, scale, gnames, gfiles):
         RG_STATUS:   ([(P, P)], 0),
         RG_CHEV:     ([(P, P), (C["HOVER"], C["HOVER"]),
                        (C["PRESSED"], C["PRESSED"]), (P, P)], 0),
+        RG_TILE2:    ([(P, P)] * (NTILE2 * NSTATE), 0),
     }
 
     # ------------------------------------------------------------ layout --
@@ -525,9 +543,10 @@ def build(skin, scale, gnames, gfiles):
         RG_POPUP:    (4,  ins_popup,                   F_SLICE9),
         RG_STATUS:   (1,  (0,0,0,0),                   F_TILEX),
         RG_CHEV:     (4,  (0,0,0,0),                   0),
+        RG_TILE2:    (NTILE2*NSTATE, (0,0,0,0),        0),
     }
     COLS = {RG_TILE: NSTATE * 4, RG_TILEACC: NSTATE * 2,
-            RG_RADIO: NSTATE, RG_CHECK: NSTATE}
+            RG_RADIO: NSTATE, RG_CHECK: NSTATE, RG_TILE2: NSTATE * 2}
 
     SHEET_W = 16 * ((int(round(560 * S)) + 15) // 16)
     shelf = Shelf(SHEET_W)

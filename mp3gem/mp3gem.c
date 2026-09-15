@@ -381,18 +381,24 @@ static void relayout(void)
  * Scale. The skin comes in 100, 125 and 175 percent sheets; by default the
  * screen width picks one (1920 wide gets 175), which is a lot of player on
  * a 1080-line desktop. Keys 1, 2 and 3 pick a sheet, 0 goes back to the
- * screen's choice, and the choice is kept in MP3GEM.INF next to the .PRG:
+ * screen's choice, and the choice is kept in <boot>:\MP3GEM.INF:
  *
  *     scale=125
  *
  * A number other than 100, 125 or 175 (or no file) means "by screen".
  */
+/* The .PRG lives on the read-only HOSTFS share, so the .INF goes to the
+ * root of the boot drive (_bootdev at $446; C: if that looks wrong). */
+static long boot_drive_sv(void) { return *(volatile short *)0x446L; }
+
 static void inf_path(char *out, long n)
 {
-    char pd[192];
+    long d = Supexec(boot_drive_sv);
 
-    apj_skin_progdir(pd, (long)sizeof pd);
-    sprintf(out, "%.*sMP3GEM.INF", (int)(n - 12), pd);
+    if (d < 0 || d > 25)
+        d = 2;                              /* C: */
+    sprintf(out, "%c:\\MP3GEM.INF", (char)('A' + d));
+    (void)n;
 }
 
 static short inf_scale(void)

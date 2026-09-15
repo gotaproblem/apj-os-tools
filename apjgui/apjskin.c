@@ -372,11 +372,25 @@ void apj_skin_9(short vh, short rid, short state,
 	bar(vh, (short) (x + l), (short) (y + t), dmw, dmh, fp);
 }
 
+short apj_skin_has_tile(short g)
+{
+	if (g >= 0 && g < APJ_G_NTILE)
+		return apj_skin_has(APJ_RG_TILE);
+	if (g >= APJ_G_TILE2_FIRST && g < APJ_G_TILE2_FIRST + APJ_G_NTILE2)
+		return apj_skin_has(APJ_RG_TILE2) &&
+		       sk_reg[APJ_RG_TILE2].n >= APJ_G_NTILE2 * APJ_ST_N;
+	return 0;
+}
+
 void apj_skin_tile(short vh, short g, short state, short x, short y)
 {
-	if (g < 0 || g >= APJ_G_NTILE)
+	if (!apj_skin_has_tile(g))
 		return;
-	apj_skin_blit(vh, APJ_RG_TILE, (short) (g * APJ_ST_N + state), x, y);
+	if (g < APJ_G_NTILE)
+		apj_skin_blit(vh, APJ_RG_TILE, (short) (g * APJ_ST_N + state), x, y);
+	else
+		apj_skin_blit(vh, APJ_RG_TILE2,
+		              (short) ((g - APJ_G_TILE2_FIRST) * APJ_ST_N + state), x, y);
 }
 
 void apj_skin_tileacc(short vh, short g, short state, short x, short y)
@@ -843,15 +857,16 @@ short apj_skin_load(short vh, const char *name)
 		return 0;
 
 	/*
-	 * Version 2 added the seven PSCTRL regions at the end of the table.
-	 * Both versions load: the region count in the header is what says
-	 * how many are there, and anything past it is marked absent rather
-	 * than making the whole file unreadable. That is what lets a rebuilt
-	 * MP3GEM keep running on a skin set that has not been rebuilt yet.
+	 * Version 2 added the seven PSCTRL regions at the end of the table,
+	 * version 3 the PDFGEM tiles after those. All of them load: the
+	 * region count in the header is what says how many are there, and
+	 * anything past it is marked absent rather than making the whole
+	 * file unreadable. That is what lets a rebuilt MP3GEM keep running
+	 * on a skin set that has not been rebuilt yet.
 	 */
 	if (Fread((short) fh, (long) HEAD_LEN, head) != HEAD_LEN ||
 	    memcmp(head, "APJS", 4) != 0 ||
-	    be16(head + 4) < 1 || be16(head + 4) > 2)
+	    be16(head + 4) < 1 || be16(head + 4) > 3)
 	{
 		Fclose((short) fh);
 		return 0;

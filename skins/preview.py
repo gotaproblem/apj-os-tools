@@ -14,7 +14,7 @@ windows out of it, using only the operations the 68k side can do:
 If a window looks right here it will look right on the Atari, because
 nothing here is available to preview.py that is not available to the app.
 
-Usage: preview.py [--mp3 | --psctrl | --psmon] <file.SKN> <out.png> [tab]
+Usage: preview.py [--mp3 | --psctrl | --psmon | --pdfgem] <file.SKN> <out.png> [tab]
 """
 import os, struct, sys
 from PIL import Image, ImageDraw, ImageFont
@@ -95,7 +95,7 @@ def _font(path, px):
 (RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE,
  RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL,
  RG_TAB, RG_TABBAR, RG_RADIO, RG_CHECK, RG_FIELD, RG_POPUP,
- RG_STATUS, RG_CHEV) = range(20)
+ RG_STATUS, RG_CHEV, RG_TILE2) = range(21)
 
 # sheet version 2 adds RG_TAB..RG_STATUS and two BADGE states
 BG_PLAIN, BG_ACCENT, BG_WARN, BG_DANGER = range(4)
@@ -113,6 +113,10 @@ EXTRA = ["ACCENT_INK","ACCENT_DEEP","MUTED","PANEL_TOP","ROW","HAIR"]
 G_PLAY, G_PAUSE, G_STOP, G_PREV, G_NEXT, G_RW, G_FF, G_SHUFFLE, G_REPEAT, \
 G_REPEAT1, G_VOL, G_VOLLOW, G_MUTE, G_OPEN, G_LIST, G_FULL, G_UNFULL, \
 G_EJECT, G_INFO, G_AUDIO, G_VIDEO = range(21)
+# sheet version 3: the PDFGEM toolbar, glyphs 24..33 with a TILE2 each
+(G_PGPREV, G_PGNEXT, G_ZOOMOUT, G_ZOOMIN, G_FITW, G_FITP, G_SEARCH,
+ G_FINDPREV, G_FINDNEXT, G_ROTATE) = range(24, 34)
+G_TILE2_FIRST = 24
 
 # NOTE: the window layout below is illustrative. mp3gem/mp3ui.c is the
 # authority for MP3GEM's real geometry; this file exists to prove a .SKN
@@ -129,8 +133,8 @@ class Skin:
          o_pixl) = struct.unpack(">4s7H2H4I", d[:38])
         self.tw, self.th, self.acc, pixfmt, _ = struct.unpack(">5H", d[38:48])
         o_midc, = struct.unpack(">I", d[48:52])
-        if magic != b"APJS" or ver not in (1, 2):
-            sys.exit("not an APJSKIN v1 or v2 file")
+        if magic != b"APJS" or ver not in (1, 2, 3):
+            sys.exit("not an APJSKIN v1, v2 or v3 file")
         self.ver = ver
         self.nreg = nreg
         if pixfmt != 0:
@@ -741,6 +745,173 @@ def psmon(sk, W_pt=530, H_pt=392):
     return im
 
 
+# ======================================================== PDFGEM window ==
+PDF_OUTLINE = [
+    (0, "Title Page", 1), (0, "Simulator Information", 3), (0, "List of Tests", 5),
+    (0, "Text Revision List", 13), (0, "List of Required Signatures", 15),
+    (0, "1  Performance", 21), (1, "1.1  Engine start", 42), (1, "1.2  Taxi", 58),
+    (1, "1.3  Take-off", 71), (1, "1.4  Climb", 96), (1, "1.5  Cruise", 118),
+    (0, "2  Handling qualities", 140), (1, "2.1  Static control checks", 141),
+    (1, "2.2  Dynamic control checks", 176), (1, "2.3  Longitudinal", 210),
+    (1, "2.4  Lateral-directional", 262), (0, "3  Motion system", 330),
+    (0, "4  Visual system", 402), (0, "5  Sound system", 455),
+]
+
+
+def pdfgem(sk, W_pt=700, H_pt=520):
+    """The same geometry as pdfgem/pdfui.c: toolbar on the mica band, an
+    outline group left, the page pane right, the status strip. The page
+    itself is a drawn stand-in for the host-filled buffer."""
+    m = sk.m
+    W, H = m(W_pt), m(H_pt)
+    C = sk.pal
+    im = Image.new("RGBA", (W, H), C["PANEL"])
+    sk.fill(im, 0, 0, W, H, "PANEL")
+    sk.tilex(im, RG_PANELTOP, 0, 0, 0, W)
+    has2 = sk.nreg > RG_TILE2
+
+    pad, gap = m(10), m(2)
+    tw, th = sk.tw, sk.th
+    small, body = 9, 11
+    bw = sk.tw_of("0", body)
+    sw = sk.tw_of("0", small)
+
+    def tile(gid, st, x, y, fallback):
+        if gid < 19:
+            sk.blit(im, RG_TILE, gid*4 + st, x, y)
+        elif has2:
+            sk.blit(im, RG_TILE2, (gid - G_TILE2_FIRST)*4 + st, x, y)
+        else:
+            sk.blit9(im, RG_BTN, st, x, y, tw, th)
+            sk.text(im, x + (tw - sk.tw_of(fallback, body))//2, y + (th - m(body) - m(3))//2,
+                    fallback, "TEXT", body)
+
+    # ---- toolbar, as pdfui_layout() lays it ---------------------------
+    y = pad
+    x = pad
+    tile(G_OPEN, ST_NORM, x, y, "Open"); x += tw + m(10)
+    tile(G_PGPREV, ST_NORM, x, y, "<"); x += tw + gap
+    fieldw = bw * 5 + m(10)
+    sk.blit9(im, RG_FIELD, FLD_NORM, x, y, fieldw, th)
+    sk.text(im, x + fieldw - m(7) - sk.tw_of("42", body), y + (th - m(body) - m(3))//2, "42", "TEXT", body)
+    sk.text(im, x + fieldw + m(6), y + (th - m(body) - m(3))//2, "/ 3272", "MUTED", body)
+    x += fieldw + m(6) + bw * 6 + m(6)
+    tile(G_PGNEXT, ST_NORM, x, y, ">"); x += tw + m(10)
+    tile(G_ZOOMOUT, ST_NORM, x, y, "-"); x += tw + gap
+    zoomw = sw * 4 + m(12)
+    sk.blit9(im, RG_BADGE, BG_PLAIN, x, y + (th - m(16))//2, zoomw, m(16))
+    sk.text(im, x + (zoomw - sk.tw_of("100%", small))//2, y + (th - m(16))//2 + m(2), "100%", "MUTED", small)
+    x += zoomw + gap
+    tile(G_ZOOMIN, ST_NORM, x, y, "+"); x += tw + m(6)
+    tile(G_FITW, ST_ON, x, y, "W"); x += tw + gap
+    tile(G_FITP, ST_NORM, x, y, "P"); x += tw + gap
+    tile(G_ROTATE, ST_NORM, x, y, "R"); x += tw + m(12)
+
+    rx = W - pad - tw
+    tile(G_INFO, ST_NORM, rx, y, "i")
+    rx -= gap + tw
+    tile(G_LIST, ST_ON, rx, y, "=")
+    rx -= m(10) + tw
+    tile(G_FINDNEXT, ST_HOVER, rx, y, "v")
+    rx -= gap + tw
+    tile(G_FINDPREV, ST_NORM, rx, y, "^")
+    searchw = m(150)
+    rx -= gap + searchw
+    sk.blit9(im, RG_FIELD, FLD_FOCUS, rx, y, searchw, th)
+    g = sk.gsz
+    sk.glyph(im, G_SEARCH, rx + m(6), y + (th - g)//2, "MUTED")
+    tx = rx + m(6) + g + m(6)
+    sk.text(im, tx, y + (th - m(body) - m(3))//2, "engine", "TEXT", body)
+    sk.fill(im, tx + sk.tw_of("engine", body) + 1, y + m(5), max(1, m(1)), th - m(10), "ACCENT")
+
+    # ---- body ----------------------------------------------------------
+    by = y + th + m(10)
+    stath = max(m(18), m(small) + m(3) + m(6))
+    bh = H - by - pad - stath
+    olw = m(190)
+    rowh = max(m(22), m(small) + m(3) + m(6))
+    headh = m(18)
+
+    sk.blit9(im, RG_GROUP, 0, pad, by, olw, bh)
+    sk.text(im, pad + m(8), by + (headh - m(small) - m(3))//2 + m(2), "OUTLINE  758", "MUTED", small)
+    vis = (bh - headh - m(8)) // rowh
+    ry = by + headh + m(4)
+    for i, (depth, title, page) in enumerate(PDF_OUTLINE[:vis]):
+        sel = (i == 6)
+        if sel:
+            sk.blit9(im, RG_ROWSEL, 0, pad + m(2), ry, olw - m(4) - m(6) - m(8), rowh)
+        tx = pad + m(10) + depth * m(12)
+        pn = str(page)
+        avail = pad + olw - m(14) - m(6) - sw * (len(pn) + 1) - tx
+        label = title
+        while sk.tw_of(label, small) > avail and len(label) > 4:
+            label = label[:-4] + "..."
+        role = "SELFG" if sel else ("MUTED" if depth else "TEXT")
+        sk.text(im, tx, ry + (rowh - m(small) - m(3))//2, label, role, small)
+        sk.text(im, pad + olw - m(14) - m(6) - sk.tw_of(pn, small),
+                ry + (rowh - m(small) - m(3))//2, pn, "SELFG" if sel else "MUTED", small)
+        ry += rowh
+    svw = m(6)
+    sx_ = pad + olw - m(4) - svw
+    sy_ = by + headh + m(4)
+    sh_ = bh - headh - m(8)
+    sk.blit9(im, RG_VSCROLL, 0, sx_, sy_, svw, sh_)
+    sk.blit9(im, RG_VSCROLL, 1, sx_, sy_, svw, max(m(12), sh_ * vis // 758 + m(20)))
+
+    # the pane, the viewport, a stand-in page
+    px = pad + olw + m(8)
+    pw = W - pad - px
+    sk.blit9(im, RG_GROUP, 0, px, by, pw, bh)
+    inner = m(6)
+    vx, vy = px + inner, by + inner
+    vw, vh_ = pw - 2 * inner - svw - m(4), bh - 2 * inner
+    gfill = sk.reg[RG_GROUP]["mid"][0][0]
+    canvas = min((gfill, C["PANEL"]), key=lambda c: c[0] + c[1] + c[2])
+    ImageDraw.Draw(im).rectangle([vx, vy, vx + vw - 1, vy + vh_ - 1], fill=canvas)
+    pgw = vw
+    pgh = pgw * 1056 // 816
+    page = Image.new("RGBA", (pgw, min(pgh, vh_)), (255, 255, 255, 255))
+    d = ImageDraw.Draw(page)
+    f = _font(SANS, m(14)); fb = _font(SANS, m(9))
+    d.text((m(40), m(24)), "1.1  ENGINE START", font=f, fill=(20, 20, 20))
+    yy = m(52)
+    for line in ("1.1.1  Purpose. This test demonstrates that the simulator engine start",
+                 "sequence, indications and timing match the reference aircraft data.",
+                 "", "1.1.2  Initial conditions. Aircraft on ground, parking brake set, all",
+                 "engines shut down, APU running, bleed air ON, packs OFF."):
+        if line:
+            d.text((m(40), yy), line, font=fb, fill=(30, 30, 30))
+            i = line.lower().find("engine")
+            if i >= 0:
+                x0 = m(40) + d.textlength(line[:i], font=fb)
+                x1 = m(40) + d.textlength(line[:i+6], font=fb)
+                hl = Image.new("RGBA", page.size, (0, 0, 0, 0))
+                ImageDraw.Draw(hl).rectangle([x0 - 2, yy - 1, x1 + 2, yy + m(12)],
+                                             fill=C["ACCENT"][:3] + (80,), outline=C["ACCENT"][:3] + (200,))
+                page.alpha_composite(hl)
+        yy += m(14)
+    im.alpha_composite(page, (vx, vy))
+    sx2 = px + pw - m(4) - svw
+    sk.blit9(im, RG_VSCROLL, 0, sx2, vy, svw, vh_)
+    sk.blit9(im, RG_VSCROLL, 1, sx2, vy, svw, max(m(24), vh_ * vh_ // pgh))
+
+    # ---- status strip ----------------------------------------------------
+    sy = H - stath
+    sk.fill(im, 0, sy, W, stath, "PANEL")
+    sk.fill(im, 0, sy, W, 1, "BORDER")
+    ty = sy + (stath - m(small) - m(3))//2
+    sk.text(im, pad, ty, "747-MQTG.PDF  .  3272 pages  .  816x1056 px  .  100%  .  fit width", "MUTED", small)
+    bx = W - pad
+    for label, st in (("rendering 43...", BG_PLAIN), ("3 hits on this page", BG_ACCENT)):
+        bwid = sk.tw_of(label, small) + m(12)
+        bx -= bwid
+        sk.blit9(im, RG_BADGE, st, bx, sy + (stath - m(16))//2, bwid, m(16))
+        sk.text(im, bx + m(6), sy + (stath - m(16))//2 + m(2), label,
+                "ACCENT_INK" if st == BG_ACCENT else "MUTED", small)
+        bx -= m(6)
+    return im
+
+
 def chrome(sk, body, title):
     """XaAES draws this, not the skin - here only so the shot reads right"""
     W = body.size[0]
@@ -758,7 +929,7 @@ def main(a):
     if len(a) < 3:
         sys.exit(__doc__.strip())
     which = "mp3"
-    if a[1] in ("--mp3", "--psctrl", "--psmon"):
+    if a[1] in ("--mp3", "--psctrl", "--psmon", "--pdfgem"):
         which = a[1][2:]
         a = a[:1] + a[2:]
     sk = Skin(a[1])
@@ -767,6 +938,9 @@ def main(a):
             sys.exit("%s is a version 1 sheet - it has no STATUS region" % a[1])
         body = psmon(sk)
         out = chrome(sk, body, "PiSTorm Monitor")
+    elif which == "pdfgem":
+        body = pdfgem(sk)
+        out = chrome(sk, body, "S:\\MEDIA\\747-MQTG.PDF")
     elif which == "psctrl":
         if sk.nreg <= RG_VSCROLL:
             sys.exit("%s is a version 1 sheet - it has no PSCTRL regions" % a[1])

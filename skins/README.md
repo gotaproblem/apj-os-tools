@@ -38,6 +38,9 @@ The first and fourth of those exist because of **desk accessories**. A
 and the program-relative entries find nothing at all.
 
 Requires python3, cairosvg and Pillow — the same as `icons/mkicons.py`.
+Without cairosvg, `mkskin.py` falls back to `svgraster.py` (librsvg and
+cairo through ctypes), which is how the sheets get built in the cloud
+container.
 
 On a Mac the hurdle is not the Python packages but the C library under
 cairosvg, and Homebrew's python refuses a system-wide `pip install`
@@ -83,6 +86,7 @@ Copy a token file, change the colours, give it a new four-letter `file`, run
 | FIELD | a value box: normal, focused, disabled |
 | POPUP, CHEV | an enum plate, and its arrow as a separate small blit |
 | STATUS | the bottom strip |
+| TILE2 | 10 glyphs × 4 states for the PDFGEM toolbar (version 3) |
 
 Plus an 8-bit coverage atlas of all 24 glyphs, for the one case that does need
 blending: a glyph over the video overlay plane, or the play mark on a selected
@@ -102,9 +106,12 @@ anywhere but its corners, that is the choice: a separate blit, or a fill.
 
 ## Sheet versions
 
-`SKN_VERSION` is **2**. Version 1 stopped at `VSCROLL` (twelve regions);
+`SKN_VERSION` is **3**. Version 1 stopped at `VSCROLL` (twelve regions);
 version 2 adds the seven PSCTRL regions plus `CHEV`, and two more `BADGE`
-states (warn and danger, for the apply-class badge).
+states (warn and danger, for the apply-class badge); version 3 adds `TILE2`
+- the ten PDFGEM toolbar tiles (glyphs 24..33 in `order.txt`, the TILE
+recipe) - and ten more glyphs in the coverage atlas. Sheet heights grew
+by about a fifth for it (175 %: 992×932, 2.7 MB on disk, 3.6 MB in TT-RAM).
 
 `apjskin.c` loads either: the region count in the header says how many are
 there, anything past it is marked absent, and `apj_skin_has(rid)` reports

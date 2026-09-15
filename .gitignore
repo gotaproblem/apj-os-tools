@@ -9,3 +9,15 @@ skins/_to_delete/
 # cloud session, so they are ignored rather than removed)
 tests/*/harness
 tests/*/out.ppm
+
+# build products and scratch that only exist because the cloud session
+# cannot delete files in a connected folder
+*.o
+*.bak
+*.dSYM/
+_to_delete/
+Claude outputs/
+mp3gem/mp3gem.inf
+
+# first cut of the PSPDF host change as a git patch; superseded by hostpatches/pspdf/
+hostpatches/0021-PSPDF-host-side-PDF-rendering.patch
