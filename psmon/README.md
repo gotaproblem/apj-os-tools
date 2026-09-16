@@ -78,7 +78,7 @@ INF ended up beside whatever was in the foreground.)
 
 ```
 scale=125
-skins=S:\APJ-OS\NATFEATS\SKINS
+skins=C:\GEMSYS\SKINS
 ```
 
 `1` / `2` / `3` set 100% / 125% / 175% and write the file; `0` follows the

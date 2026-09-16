@@ -14,7 +14,7 @@ windows out of it, using only the operations the 68k side can do:
 If a window looks right here it will look right on the Atari, because
 nothing here is available to preview.py that is not available to the app.
 
-Usage: preview.py [--mp3 | --psctrl | --psmon | --pdfgem] <file.SKN> <out.png> [tab]
+Usage: preview.py [--mp3 | --psctrl | --psmon | --pdfgem | --webgem] <file.SKN> <out.png> [tab|tabs]
 """
 import os, struct, sys
 from PIL import Image, ImageDraw, ImageFont
@@ -95,7 +95,7 @@ def _font(path, px):
 (RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE,
  RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL,
  RG_TAB, RG_TABBAR, RG_RADIO, RG_CHECK, RG_FIELD, RG_POPUP,
- RG_STATUS, RG_CHEV, RG_TILE2) = range(21)
+ RG_STATUS, RG_CHEV, RG_TILE2, RG_TILE3) = range(22)
 
 # sheet version 2 adds RG_TAB..RG_STATUS and two BADGE states
 BG_PLAIN, BG_ACCENT, BG_WARN, BG_DANGER = range(4)
@@ -117,6 +117,10 @@ G_EJECT, G_INFO, G_AUDIO, G_VIDEO = range(21)
 (G_PGPREV, G_PGNEXT, G_ZOOMOUT, G_ZOOMIN, G_FITW, G_FITP, G_SEARCH,
  G_FINDPREV, G_FINDNEXT, G_ROTATE) = range(24, 34)
 G_TILE2_FIRST = 24
+# sheet version 4: the WEBGEM toolbar, glyphs 34..43 with a TILE3 each
+(G_BACK, G_FWD, G_RELOAD, G_STOPX, G_HOME, G_TABNEW, G_TABCLOSE,
+ G_BOOKMARK, G_LOCK, G_DOWNLOAD) = range(34, 44)
+G_TILE3_FIRST = 34
 
 # NOTE: the window layout below is illustrative. mp3gem/mp3ui.c is the
 # authority for MP3GEM's real geometry; this file exists to prove a .SKN
@@ -133,8 +137,8 @@ class Skin:
          o_pixl) = struct.unpack(">4s7H2H4I", d[:38])
         self.tw, self.th, self.acc, pixfmt, _ = struct.unpack(">5H", d[38:48])
         o_midc, = struct.unpack(">I", d[48:52])
-        if magic != b"APJS" or ver not in (1, 2, 3):
-            sys.exit("not an APJSKIN v1, v2 or v3 file")
+        if magic != b"APJS" or ver not in (1, 2, 3, 4):
+            sys.exit("not an APJSKIN v1..v4 file")
         self.ver = ver
         self.nreg = nreg
         if pixfmt != 0:
@@ -912,6 +916,125 @@ def pdfgem(sk, W_pt=700, H_pt=520):
     return im
 
 
+# ======================================================== WEBGEM window ==
+def webgem_layout(sk, W, H, ntabs):
+    """The same geometry as webgem/webui.c (webui_layout): returns a dict of
+    id -> (x, y, w, h) in pixels. Keep the two in step."""
+    m = sk.m
+    pad, gap = m(8), m(2)
+    tw, th = sk.tw, sk.th
+    tabh = m(30) if ntabs > 1 else 0
+    toolh = pad + th + pad
+    stath = m(18)
+    L = {}
+    y = tabh
+    ty = y + pad
+    x = pad
+    for name in ("BACK", "FWD", "RELOAD", "HOME"):
+        L[name] = (x, ty, tw, th)
+        x += tw + gap
+    x += m(10) - gap
+    rx = W - pad - tw
+    for name in ("MENU", "DOWNLOAD", "BOOKMARK"):
+        L[name] = (rx, ty, tw, th)
+        rx -= tw + gap
+    rx += gap - m(10)
+    L["ADDRESS"] = (x, ty, max(m(40), rx - x), th)
+    L["TABBAR"] = (0, 0, W, tabh)
+    L["PAGE"] = (0, y + toolh, W, H - (y + toolh) - stath)
+    L["STATUS"] = (0, H - stath, W, stath)
+    return L
+
+
+def webgem(sk, W_px=1280, H_px=None, ntabs=1, loading=False):
+    """The same geometry as webgem/webui.c: tab strip (only past one tab),
+    toolbar on the mica band, the page full bleed, the status strip. The
+    page itself is a stand-in for the buffer psweb fills."""
+    m = sk.m
+    C = sk.pal
+    tw, th = sk.tw, sk.th
+    tabh = m(30) if ntabs > 1 else 0
+    W = W_px
+    H = H_px or (tabh + m(8) + th + m(8) + 678 + m(18))
+    L = webgem_layout(sk, W, H, ntabs)
+    small, body = 9, 11
+    im = Image.new("RGBA", (W, H), C["PANEL"])
+    sk.fill(im, 0, 0, W, H, "PANEL")
+
+    def tile3(gid, st, x, y):
+        sk.blit(im, RG_TILE3, (gid - G_TILE3_FIRST)*4 + st, x, y)
+
+    # tab strip
+    if ntabs > 1:
+        x0, y0, w0, h0 = L["TABBAR"]
+        sk.tilex(im, RG_TABBAR, 0, x0, y0, w0)
+        tabw = m(200)
+        names = ["Wikipedia, the free encyclopedia", "Atari ST - Wikipedia", "Hacker News",
+                 "The Register", "DuckDuckGo"]
+        x = 0
+        for i in range(ntabs):
+            sel = i == 0
+            sk.blit9(im, RG_TAB, ST_ON if sel else ST_NORM, x, 0, tabw, tabh)
+            if sel:
+                sk.fill(im, x + m(6), tabh - m(3), tabw - m(12), m(3), "ACCENT")
+            label = names[i % len(names)]
+            maxw = tabw - m(16) - sk.gsz - m(8)
+            while sk.tw_of(label, small) > maxw and len(label) > 4:
+                label = label[:-4] + "..."
+            sk.text(im, x + m(10), (tabh - m(small) - m(3))//2 + m(1), label,
+                    "TEXT" if sel else "MUTED", small)
+            if sel:
+                sk.glyph(im, G_TABCLOSE, x + tabw - m(8) - sk.gsz, (tabh - sk.gsz)//2, "MUTED")
+            x += tabw + m(2)
+        sk.glyph(im, G_TABNEW, x + m(6), (tabh - sk.gsz)//2, "MUTED")
+
+    # toolbar band
+    sk.tilex(im, RG_PANELTOP, 0, 0, tabh, W)
+    for name, gid in (("BACK", G_BACK), ("FWD", G_FWD),
+                      ("RELOAD", G_STOPX if loading else G_RELOAD), ("HOME", G_HOME),
+                      ("DOWNLOAD", G_DOWNLOAD), ("BOOKMARK", G_BOOKMARK)):
+        x, y, w, h = L[name]
+        tile3(gid, ST_HOVER if name == "BOOKMARK" else ST_NORM, x, y)
+    x, y, w, h = L["MENU"]
+    sk.blit(im, RG_TILE, G_LIST*4 + ST_NORM, x, y)
+    x, y, w, h = L["ADDRESS"]
+    sk.blit9(im, RG_FIELD, FLD_NORM, x, y, w, h)
+    sk.glyph(im, G_LOCK, x + m(8), y + (h - sk.gsz)//2, "MUTED")
+    sk.text(im, x + m(8) + sk.gsz + m(6), y + (h - m(body) - m(3))//2,
+            "https://en.wikipedia.org/wiki/Main_Page", "TEXT", body)
+    if loading:
+        sk.fill(im, x + m(4), y + h - m(3), int((w - m(8)) * 0.62), m(2), "ACCENT")
+
+    # the page: a stand-in
+    x, y, w, h = L["PAGE"]
+    sk.fill(im, x, y - 1, w, 1, "BORDER")
+    ImageDraw.Draw(im).rectangle([x, y, x + w - 1, y + h - 1], fill=(255, 255, 255, 255))
+    d = ImageDraw.Draw(im)
+    for i in range(12):
+        yy = y + m(24) + i * m(18)
+        if yy + m(8) > y + h:
+            break
+        d.rectangle([x + m(24), yy, x + w - m(24) - (i % 3) * m(60), yy + m(8)], fill=(225, 228, 232, 255))
+
+    # status strip
+    x, y, w, h = L["STATUS"]
+    sk.tilex(im, RG_STATUS, 0, x, y, w)
+    ty2 = y + (h - m(small) - m(3))//2 + m(1)
+    sk.text(im, m(8), ty2, "https://en.wikipedia.org/wiki/Special:Random", "MUTED", small)
+    bx = W - m(8)
+    badges = [("blocker", BG_ACCENT), ("JS", BG_PLAIN)]
+    if loading:
+        badges.insert(0, ("loading 62%", BG_PLAIN))
+    for label, st in badges:
+        bwid = sk.tw_of(label, small) + m(12)
+        bx -= bwid
+        sk.blit9(im, RG_BADGE, st, bx, y + (h - m(16))//2, bwid, m(16))
+        sk.text(im, bx + m(6), y + (h - m(16))//2 + m(2), label,
+                "ACCENT_INK" if st == BG_ACCENT else "MUTED", small)
+        bx -= m(6)
+    return im
+
+
 def chrome(sk, body, title):
     """XaAES draws this, not the skin - here only so the shot reads right"""
     W = body.size[0]
@@ -929,7 +1052,7 @@ def main(a):
     if len(a) < 3:
         sys.exit(__doc__.strip())
     which = "mp3"
-    if a[1] in ("--mp3", "--psctrl", "--psmon", "--pdfgem"):
+    if a[1] in ("--mp3", "--psctrl", "--psmon", "--pdfgem", "--webgem"):
         which = a[1][2:]
         a = a[:1] + a[2:]
     sk = Skin(a[1])
@@ -941,6 +1064,11 @@ def main(a):
     elif which == "pdfgem":
         body = pdfgem(sk)
         out = chrome(sk, body, "S:\\MEDIA\\747-MQTG.PDF")
+    elif which == "webgem":
+        if sk.nreg <= RG_TILE3:
+            sys.exit("%s is an older sheet - it has no TILE3 region" % a[1])
+        body = webgem(sk, ntabs=int(a[3]) if len(a) > 3 else 1)
+        out = chrome(sk, body, "Wikipedia, the free encyclopedia")
     elif which == "psctrl":
         if sk.nreg <= RG_VSCROLL:
             sys.exit("%s is a version 1 sheet - it has no PSCTRL regions" % a[1])

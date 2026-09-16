@@ -12,23 +12,23 @@ make                 PSCTRL.ACC and PSCTRL.PRG
 ```
 
 Install `PSCTRL.ACC` in the root of the boot drive. The `.SKN` files live
-in `S:\APJ-OS\NATFEATS\SKINS\` with the rest of the PiSTorm tools, which
-is where the engine looks by default. Without a skin it still runs, on the
+in `C:\GEMSYS\SKINS\`, the common home every PiSTorm app looks in, so
+nothing has to be configured. Without a skin it still runs, on the
 flat `apjgui` controls, and says which file it wanted and where it looked.
 
 **Why the skins folder needs saying out loud for an accessory.** A `.PRG`
 sits with the other tools, so `<progdir>SKINS\` finds the sheets beside
 it and nothing has to be configured. An `.ACC` is loaded from the **root
 of the boot drive**, so its progdir is `C:\` and it will never see them.
-Hence the built-in `S:\APJ-OS\NATFEATS\SKINS\` in the search path, and
-the override:
+Hence the built-in `C:\GEMSYS\SKINS\` in the search path, and the
+override:
 
     C:\PSCTRL.INF
     scale=125
-    skins=S:\APJ-OS\NATFEATS\SKINS
+    skins=C:\GEMSYS\SKINS
 
 `skins=` is only needed if the sheets are somewhere other than the two
-built-in locations. It is preserved when the 1/2/3 keys rewrite the scale.
+built-in locations (three, with the old share path). It is preserved when the 1/2/3 keys rewrite the scale.
 
 ## Why an accessory
 

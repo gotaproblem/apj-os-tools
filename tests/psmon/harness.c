@@ -48,6 +48,13 @@ static void model_normal(PMDATA *d)
 	d->throttled   = 0;
 	d->pi_model    = 0x11;
 	d->pi_ram_mb   = 4096;
+	d->net         = 1 | 2 | (78L << 8);
+	d->ipv4        = (192L << 24) | (168L << 16) | (1L << 8) | 23L;
+	d->input       = 1 | 2 | 4 | 8 | (3L << 8);
+	d->web_state   = 3;
+	d->web_fps_x10 = 128;
+	d->web_kbps    = 4200;
+	d->web_rss_mb  = 412;
 }
 
 /* every reading absent: an emulator older than this build */
@@ -60,6 +67,8 @@ static void model_absent(PMDATA *d)
 	d->flushes = d->compiles = d->smc = PM_NONE;
 	d->soc_mc = d->arm_khz = d->load_x100 = d->throttled = PM_NONE;
 	d->pi_model = d->pi_ram_mb = PM_NONE;
+	d->net = d->ipv4 = d->input = PM_NONE;
+	d->web_state = d->web_fps_x10 = d->web_kbps = d->web_rss_mb = PM_NONE;
 	d->st_total = 4L * 1024L * 1024L;
 	d->st_free  = 512L * 1024L;
 	d->tt_total = 0;			/* no TT-RAM: one memory row */
@@ -81,6 +90,13 @@ static void model_wide(PMDATA *d)
 	d->tt_total    = 512L * 1024L * 1024L;
 	d->tt_free     = 511L * 1024L * 1024L;
 	d->pi_model    = 0x17;
+	d->net         = 1 | 2 | (100L << 8);
+	d->ipv4        = (255L << 24) | (255L << 16) | (255L << 8) | 255L;
+	d->input       = 1 | 2 | 4 | 8 | (255L << 8);
+	d->web_state   = 3;
+	d->web_fps_x10 = 9999;
+	d->web_kbps    = 999999;
+	d->web_rss_mb  = 99999;
 	d->soc_mc      = 85000;
 	d->throttled   = 0x000f000fL;		/* everything, now and before */
 	d->pi_ram_mb   = 8192;
@@ -222,6 +238,18 @@ int main(int argc, char **argv)
 		psmonui_draw(&u, vh);
 		check_text(&u);
 		check_lines(&u);
+		/* the normal model's address is 192.168.1.23 - a negative long
+		 * on the 68k, which once printed as "no address" */
+		if (m == 0)
+		{
+			short i, seen = 0;
+
+			for (i = 0; i < ntxt; i++)
+				if (strstr(txt[i].s, "192.168.1.23"))
+					seen = 1;
+			if (!seen)
+				fail("the Network row does not show the address", 0, 0);
+		}
 		/*
 		 * Every line must be ON the window and WHOLE. A row that
 		 * runs off the bottom draws nothing and an ellipsised value

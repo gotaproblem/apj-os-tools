@@ -250,6 +250,31 @@ void apj_skin_tilex(short vh, short rid, short state, short x, short y, short w)
 	}
 }
 
+/* the same, but only the top h rows of the region, and only the tiles
+ * that meet [x0, x0+w0): a strip repaint of a tiled band */
+void apj_skin_tilexh(short vh, short rid, short state, short x, short y,
+                     short w, short h, short x0, short w0)
+{
+	short sx, sy, sw, sh, i, n;
+
+	if (!apj_skin_has(rid) || w <= 0 || h <= 0 || w0 <= 0)
+		return;
+	src_of(rid, state, &sx, &sy);
+	sw = sk_reg[rid].w;
+	sh = sk_reg[rid].h;
+	if (h < sh)
+		sh = h;
+	for (i = 0; i < w; i += sw)
+	{
+		n = (short) (w - i);
+		if (n > sw)
+			n = sw;
+		if (x + i >= x0 + w0 || x + i + n <= x0)
+			continue;
+		copy(vh, sx, sy, n, sh, (short) (x + i), y);
+	}
+}
+
 static void bar(short vh, short x, short y, short w, short h, short pen)
 {
 	short xy[4];
@@ -379,6 +404,9 @@ short apj_skin_has_tile(short g)
 	if (g >= APJ_G_TILE2_FIRST && g < APJ_G_TILE2_FIRST + APJ_G_NTILE2)
 		return apj_skin_has(APJ_RG_TILE2) &&
 		       sk_reg[APJ_RG_TILE2].n >= APJ_G_NTILE2 * APJ_ST_N;
+	if (g >= APJ_G_TILE3_FIRST && g < APJ_G_TILE3_FIRST + APJ_G_NTILE3)
+		return apj_skin_has(APJ_RG_TILE3) &&
+		       sk_reg[APJ_RG_TILE3].n >= APJ_G_NTILE3 * APJ_ST_N;
 	return 0;
 }
 
@@ -388,9 +416,12 @@ void apj_skin_tile(short vh, short g, short state, short x, short y)
 		return;
 	if (g < APJ_G_NTILE)
 		apj_skin_blit(vh, APJ_RG_TILE, (short) (g * APJ_ST_N + state), x, y);
-	else
+	else if (g < APJ_G_TILE3_FIRST)
 		apj_skin_blit(vh, APJ_RG_TILE2,
 		              (short) ((g - APJ_G_TILE2_FIRST) * APJ_ST_N + state), x, y);
+	else
+		apj_skin_blit(vh, APJ_RG_TILE3,
+		              (short) ((g - APJ_G_TILE3_FIRST) * APJ_ST_N + state), x, y);
 }
 
 void apj_skin_tileacc(short vh, short g, short state, short x, short y)
@@ -736,11 +767,12 @@ static long try_open(const char *dir, const char *file, char *out, short note)
  *   1  the folder apj_skin_setdir() named, if any (an app's .INF)
  *   2  the program's own SKINS\ folder, and the program folder
  *   3  SKINS\ and . under the cwd
- *   4  S:\APJ-OS\NATFEATS\SKINS\  - where the PiSTorm GEM tools and
- *      their skins live on the share
- *   5  C:\OPT\GEM\SKINS\
+ *   4  C:\GEMSYS\SKINS\  - THE common home: every PiSTorm app looks
+ *      here, whatever drive or folder it was started from
+ *   5  S:\APJ-OS\NATFEATS\SKINS\  - where the tools used to keep them
+ *      on the share; and C:\OPT\GEM\SKINS\
  *
- * 1 and 4 both exist because of accessories. A .PRG sits with the rest of
+ * 1 and 4/5 both exist because of accessories. A .PRG sits with the rest of
  * the tools, so 2 finds the sheets beside it; an .ACC is loaded from the
  * ROOT of the boot drive, so its progdir is C:\ and 2 finds nothing.
  *
@@ -771,6 +803,8 @@ static long find_skin(const char *stem, short scale, char *path, short note)
 		fh = try_open("SKINS\\", file, path, note);
 	if (fh < 0)
 		fh = try_open("", file, path, note);
+	if (fh < 0)
+		fh = try_open("C:\\GEMSYS\\SKINS\\", file, path, note);
 	if (fh < 0)
 		fh = try_open("S:\\APJ-OS\\NATFEATS\\SKINS\\", file, path, note);
 	if (fh < 0)
@@ -858,7 +892,8 @@ short apj_skin_load(short vh, const char *name)
 
 	/*
 	 * Version 2 added the seven PSCTRL regions at the end of the table,
-	 * version 3 the PDFGEM tiles after those. All of them load: the
+	 * version 3 the PDFGEM tiles after those, version 4 the WEBGEM
+	 * tiles. All of them load: the
 	 * region count in the header is what says how many are there, and
 	 * anything past it is marked absent rather than making the whole
 	 * file unreadable. That is what lets a rebuilt MP3GEM keep running
@@ -866,7 +901,7 @@ short apj_skin_load(short vh, const char *name)
 	 */
 	if (Fread((short) fh, (long) HEAD_LEN, head) != HEAD_LEN ||
 	    memcmp(head, "APJS", 4) != 0 ||
-	    be16(head + 4) < 1 || be16(head + 4) > 3)
+	    be16(head + 4) < 1 || be16(head + 4) > 4)
 	{
 		Fclose((short) fh);
 		return 0;

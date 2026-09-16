@@ -36,3 +36,14 @@ SEARCH
 FINDPREV
 FINDNEXT
 ROTATE
+# --- sheet version 4: the WEBGEM toolbar. These ten get a TILE3, in this order.
+BACK
+FWD
+RELOAD
+STOPX
+HOME
+TABNEW
+TABCLOSE
+BOOKMARK
+LOCK
+DOWNLOAD

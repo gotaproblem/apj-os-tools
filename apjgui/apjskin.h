@@ -62,6 +62,10 @@ enum
 	 * an older sheet, and apj_skin_tile() then draws nothing for those
 	 * glyphs - the app must ask apj_skin_has_tile() and fall back. --- */
 	APJ_RG_TILE2,
+	/* --- sheet version 4, for WEBGEM: the ten browser toolbar tiles,
+	 * glyphs APJ_G_BACK..APJ_G_DOWNLOAD x 4 states, the TILE recipe. Same
+	 * rule as TILE2: absent on an older sheet, apj_skin_has_tile() says. --- */
+	APJ_RG_TILE3,
 	APJ_RG_N
 };
 
@@ -77,6 +81,9 @@ enum
 	APJ_G_PGPREV, APJ_G_PGNEXT, APJ_G_ZOOMOUT, APJ_G_ZOOMIN,
 	APJ_G_FITW, APJ_G_FITP, APJ_G_SEARCH, APJ_G_FINDPREV, APJ_G_FINDNEXT,
 	APJ_G_ROTATE,
+	/* sheet version 4 (WEBGEM) */
+	APJ_G_BACK, APJ_G_FWD, APJ_G_RELOAD, APJ_G_STOPX, APJ_G_HOME,
+	APJ_G_TABNEW, APJ_G_TABCLOSE, APJ_G_BOOKMARK, APJ_G_LOCK, APJ_G_DOWNLOAD,
 	APJ_G_N
 };
 
@@ -84,6 +91,8 @@ enum
 #define APJ_G_NACC	5	/* glyphs 0..4  have a TILEACC */
 #define APJ_G_TILE2_FIRST	APJ_G_PGPREV	/* ...and 24..33 a TILE2 */
 #define APJ_G_NTILE2	10
+#define APJ_G_TILE3_FIRST	APJ_G_BACK	/* ...and 34..43 a TILE3 */
+#define APJ_G_NTILE3	10
 
 /* --------------------------------------------------------- states etc -- */
 enum { APJ_ST_NORM, APJ_ST_HOVER, APJ_ST_PRESS, APJ_ST_ON, APJ_ST_N };
@@ -173,7 +182,10 @@ void  apj_skin_9    (short vh, short rid, short state,
                      short x, short y, short w, short h);
 void  apj_skin_tilex(short vh, short rid, short state,
                      short x, short y, short w);
-/* a TILE for glyphs 0..18, a TILE2 for 24..33; nothing for the rest */
+/* the same cut to h rows, drawing only the tiles that meet [x0, x0+w0) */
+void  apj_skin_tilexh(short vh, short rid, short state,
+                      short x, short y, short w, short h, short x0, short w0);
+/* a TILE for glyphs 0..18, a TILE2 for 24..33, a TILE3 for 34..43; nothing for the rest */
 void  apj_skin_tile   (short vh, short g, short state, short x, short y);
 short apj_skin_has_tile(short g);		/* 1 if this sheet can draw it */
 void  apj_skin_tileacc(short vh, short g, short state, short x, short y);

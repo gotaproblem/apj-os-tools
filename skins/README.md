@@ -21,7 +21,7 @@ Build:
     python3 preview.py out/FLTD175.SKN out/p.png
     python3 preview.py --psctrl out/FLTD175.SKN out/s.png 1   # tab 1
 
-Install on the ST: `*.SKN` → `S:\APJ-OS\NATFEATS\SKINS\`, with the rest of
+Install on the ST: `*.SKN` → `C:\GEMSYS\SKINS\`, the common home, with the rest of
 the PiSTorm tools. An app opens `<file><scale>.SKN`, where `<file>` is the
 `file` field of the token JSON (8.3 names, so keep it to four characters)
 and `<scale>` is chosen from the screen width: `< 1024` → 100, `< 1600` →
@@ -30,9 +30,9 @@ and `<scale>` is chosen from the screen width: `< 1024` → 100, `< 1600` →
 The full search order is: the folder the app named through
 `apj_skin_setdir()` (from its own `.INF`), then `<progdir>SKINS\` and the
 program folder, then `SKINS\` and `.` under the cwd, then
-`S:\APJ-OS\NATFEATS\SKINS\`, then `C:\OPT\GEM\SKINS\`.
+`C:\GEMSYS\SKINS\` (the common home), then `S:\APJ-OS\NATFEATS\SKINS\`, then `C:\OPT\GEM\SKINS\`.
 
-The first and fourth of those exist because of **desk accessories**. A
+The first and the drive-absolute ones exist because of **desk accessories**. A
 `.PRG` sits with the other tools and finds `SKINS\` beside itself; an
 `.ACC` is loaded from the root of the boot drive, so its progdir is `C:\`
 and the program-relative entries find nothing at all.

@@ -41,19 +41,19 @@ F_TILEX, F_TILEY, F_SLICE9 = 1, 2, 4
 RG_PANELTOP, RG_GROUP, RG_ROWSEL, RG_SEEK, RG_KNOB, RG_BADGE, \
 RG_ARTPH, RG_BTN, RG_BTNACC, RG_TILE, RG_TILEACC, RG_VSCROLL, \
 RG_TAB, RG_TABBAR, RG_RADIO, RG_CHECK, RG_FIELD, RG_POPUP, RG_STATUS, \
-RG_CHEV, RG_TILE2 = range(21)
-RG_N = 21
+RG_CHEV, RG_TILE2, RG_TILE3 = range(22)
+RG_N = 22
 RG_NAME = ["PANELTOP","GROUP","ROWSEL","SEEK","KNOB","BADGE",
            "ARTPH","BTN","BTNACC","TILE","TILEACC","VSCROLL",
            "TAB","TABBAR","RADIO","CHECK","FIELD","POPUP","STATUS","CHEV",
-           "TILE2"]
+           "TILE2", "TILE3"]
 
 # Sheet version. 1 = the twelve media-player regions; 2 adds the seven
 # above for PSCTRL; 3 adds TILE2, the PDFGEM toolbar tiles (glyphs 24..33,
 # the same recipe as TILE). apjskin.c loads any of them and marks the
 # missing regions absent, so an app built against 21 still runs on a
-# 12-region sheet.
-SKN_VERSION = 3
+# 12-region sheet. 4 adds TILE3, the WEBGEM toolbar tiles (glyphs 34..43).
+SKN_VERSION = 4
 
 # Metrics the PSCTRL widgets need. Kept here rather than in every token
 # file so an existing skin JSON still builds; a token file that names one
@@ -73,6 +73,8 @@ NBTNGLYPH = 19              # glyphs 0..18 get a TILE
 NACCGLYPH = 5               # glyphs 0..4 get a TILEACC
 TILE2_FIRST = 24            # glyphs 24..33 get a TILE2 (sheet version 3)
 NTILE2 = 10
+TILE3_FIRST = 34            # glyphs 34..43 get a TILE3 (sheet version 4)
+NTILE3 = 10
 NSTATE    = 4               # normal, hover, pressed, on/disabled
 
 # --------------------------------------------------------------- colour --
@@ -323,6 +325,12 @@ def build(skin, scale, gnames, gfiles):
     parts[RG_TILE2] = [tile_of(gi, st) for gi in range(TILE2_FIRST, TILE2_FIRST + NTILE2)
                        for st in range(NSTATE)]
 
+    # --- 21 TILE3: the WEBGEM toolbar, same recipe (sheet version 4) --------
+    if len(gcov) < TILE3_FIRST + NTILE3:
+        sys.exit("order.txt needs %d glyphs for TILE3, has %d" % (TILE3_FIRST + NTILE3, len(gcov)))
+    parts[RG_TILE3] = [tile_of(gi, st) for gi in range(TILE3_FIRST, TILE3_FIRST + NTILE3)
+                       for st in range(NSTATE)]
+
     # --- 10 TILEACC: round accent button with its glyph -------------------
     acov = [raster(f, max(4, int(round(gsz * 1.2)))) for f in gfiles[:NACCGLYPH]]
     ag = acov[0].size[0]
@@ -519,6 +527,7 @@ def build(skin, scale, gnames, gfiles):
         RG_CHEV:     ([(P, P), (C["HOVER"], C["HOVER"]),
                        (C["PRESSED"], C["PRESSED"]), (P, P)], 0),
         RG_TILE2:    ([(P, P)] * (NTILE2 * NSTATE), 0),
+        RG_TILE3:    ([(P, P)] * (NTILE3 * NSTATE), 0),
     }
 
     # ------------------------------------------------------------ layout --
@@ -544,9 +553,11 @@ def build(skin, scale, gnames, gfiles):
         RG_STATUS:   (1,  (0,0,0,0),                   F_TILEX),
         RG_CHEV:     (4,  (0,0,0,0),                   0),
         RG_TILE2:    (NTILE2*NSTATE, (0,0,0,0),        0),
+        RG_TILE3:    (NTILE3*NSTATE, (0,0,0,0),        0),
     }
     COLS = {RG_TILE: NSTATE * 4, RG_TILEACC: NSTATE * 2,
-            RG_RADIO: NSTATE, RG_CHECK: NSTATE, RG_TILE2: NSTATE * 2}
+            RG_RADIO: NSTATE, RG_CHECK: NSTATE, RG_TILE2: NSTATE * 2,
+            RG_TILE3: NSTATE * 2}
 
     SHEET_W = 16 * ((int(round(560 * S)) + 15) // 16)
     shelf = Shelf(SHEET_W)

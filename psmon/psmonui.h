@@ -17,7 +17,7 @@
 
 /* points; apj_skin_m() turns these into pixels at the sheet's scale */
 #define PM_W_PT		530
-#define PM_H_PT		392
+#define PM_H_PT		470	/* 14 rows; at 100% a row is the 18 px cell + 4, not ROWH */
 
 /* A reading with no value. The host answers 0xFFFFFFFF for an index it
  * does not know, and an emulator older than this build will not know
@@ -55,6 +55,14 @@ typedef struct
 	long throttled;		/* PS_HOST_THROTTLED     firmware bits        */
 	long pi_model;		/* PS_PI_MODEL           board code           */
 	long pi_ram_mb;		/* PS_PI_RAM_MB                               */
+	long net;		/* PS_HOST_NET  bit0 up, bit1 Wi-Fi, 8-15 quality */
+	long ipv4;		/* PS_HOST_IPV4  a.b.c.d as one long          */
+	long input;		/* PS_HOST_INPUT bit1 keyboard, bit2 mouse,
+				 * bit3 real IKBD, 8-15 seconds since an event */
+	long web_state;		/* PS_WEB_STATE  0 none 1 socket 2 conn 3 view */
+	long web_fps_x10;	/* PS_WEB_FPS_X10                             */
+	long web_kbps;		/* PS_WEB_KBPS                                */
+	long web_rss_mb;	/* PS_WEB_RSS_MB                              */
 
 	short host;		/* 0 = no PSCTRL NatFeat: engine/Pi are n/a   */
 } PMDATA;

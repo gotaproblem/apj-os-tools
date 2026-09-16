@@ -152,7 +152,7 @@ void psmonui_minsize(short *w, short *h)
 	*h = (short) (M(PAD) * 2 +
 	              M(HEADH) * PM_SEC_N +		/* three headings      */
 	              M(SECPAD) * 2 * PM_SEC_N +	/* their inner padding */
-	              M(ROWH) * (6 + 2 + 3) +		/* engine, memory, Pi  */
+	              M(ROWH) * (6 + 2 + 6) +		/* engine, memory, Pi  */
 	              M(GAP) * (PM_SEC_N - 1) +
 	              M(STATH));
 }
@@ -164,7 +164,7 @@ static short sec_rows(const PMUI *u, short sec)
 	{
 	case PM_SEC_ENGINE: return 6;
 	case PM_SEC_MEMORY: return (u->d && u->d->tt_total > 0) ? 2 : 1;
-	default:            return 3;
+	default:            return 6;
 	}
 }
 
@@ -230,7 +230,9 @@ void psmonui_layout(PMUI *u, short vh, short wx, short wy, short ww, short wh)
 
 			if (y + h > floorr)
 				h = (short) (floorr - y);
-			if (h < 0)
+			/* too short even for its heading: nothing, rather than a
+			 * heading spilling out of an 11 px box */
+			if (h < M(HEADH) + M(SECPAD))
 				h = 0;
 
 			u->sec[i].g_x = (short) (wx + pad);
@@ -358,6 +360,9 @@ short psmonui_sec_lines(const PMUI *u, short sec, char out[][64], short max)
 			LINE("Board", "", "n/a");
 			LINE("ARM clock", "", "n/a");
 			LINE("Health", "", "n/a");
+			LINE("Network", "", "n/a");
+			LINE("USB input", "", "n/a");
+			LINE("Browser", "", "n/a");
 			return n;
 		}
 		if (d->pi_model > 0)
@@ -398,6 +403,64 @@ short psmonui_sec_lines(const PMUI *u, short sec, char out[][64], short max)
 		else
 			strcpy(v, "ok");
 		LINE("Health", "", v);
+
+		/*
+		 * The three the menu-bar icons summarise, in words: which
+		 * link and its address, what the USB/Bluetooth input bridge
+		 * has, and the browser engine's cost while a page is open.
+		 * An emulator without these indices answers -1 = "n/a".
+		 */
+		if (d->net < 0)
+			strcpy(v, "n/a");
+		else if (!(d->net & 1))
+			strcpy(v, "down");
+		else
+		{
+			char ip[20];
+
+			/* a 32-bit address in a signed long: 192.x.x.x is negative,
+			 * so test for "none" (0) and "unknown" (-1), not for > 0 */
+			if (d->ipv4 != 0 && d->ipv4 != PM_NONE)
+				sprintf(ip, "%ld.%ld.%ld.%ld", (d->ipv4 >> 24) & 255L,
+				        (d->ipv4 >> 16) & 255L, (d->ipv4 >> 8) & 255L, d->ipv4 & 255L);
+			else
+				strcpy(ip, "no address");
+			if (d->net & 2)
+				sprintf(v, "Wi-Fi %ld%%, %s", (d->net >> 8) & 255L, ip);
+			else
+				sprintf(v, "Ethernet, %s", ip);
+		}
+		LINE("Network", (d->net > 0 && (d->net & 3) == 3) ? PCT((d->net >> 8) & 255L) : "", v);
+
+		if (d->input < 0)
+			strcpy(v, "n/a");
+		else if (!(d->input & 1))
+			strcpy(v, "bridge off (kbd usb)");
+		else if (!(d->input & 6))
+			strcpy(v, d->input & 8 ? "none attached, ST keyboard" : "none attached");
+		else
+		{
+			long age = (d->input >> 8) & 255L;
+
+			sprintf(v, "%s%s%s%s", (d->input & 2) ? "keyboard" : "",
+			        ((d->input & 6) == 6) ? " + " : "",
+			        (d->input & 4) ? "mouse" : "",
+			        age >= 255 ? ", idle" : (age < 5 ? ", active" : ""));
+		}
+		LINE("USB input", "", v);
+
+		if (d->web_state < 0)
+			strcpy(v, "n/a");
+		else if (d->web_state == 0)
+			strcpy(v, "psweb not installed");
+		else if (d->web_state == 1)
+			strcpy(v, "idle");
+		else if (d->web_state == 2)
+			sprintf(v, "connected, %ld MB", d->web_rss_mb);
+		else
+			sprintf(v, "%ld.%ld fps, %ld KB/s, %ld MB", d->web_fps_x10 / 10L,
+			        d->web_fps_x10 % 10L, d->web_kbps, d->web_rss_mb);
+		LINE("Browser", "", v);
 		return n;
 	}
 #undef LINE

@@ -51,3 +51,26 @@ have to be installed as a matched pair. Not done here.
 
 Six drawings not used by this resource are in the set for later:
 eject, folder_open, folder_new, documents, settings, media.
+
+## Status glyphs (apjglyphs.bin)
+
+The menu-bar icons left of the clock - network (Wi-Fi with 1-3 arcs,
+Wi-Fi off, Ethernet) and the USB/Bluetooth input bridge - are one-colour
+symbols XaAES tints to the theme's text pen when it draws them, so one
+file serves dark and light alike (the tinting the note above was waiting
+for, done for these first).
+
+    svg-glyph/NN-NAME.svg   NN = the glyph id, render_apj.h APJ_GLYPH_*
+    mkglyphs.py             -> apjglyphs.bin (8-bit coverage at 16/20/24/32/48 px)
+                               + glyphs-sheet.png to eyeball
+
+Install: copy apjglyphs.bin to the XaAES folder on the ST, next to the
+apjicons-*.bin files. XaAES loads it on first use; no icons appear
+without it (and none on a classic theme).
+
+Who draws what: TeraDesk reads PSCTRL 78 (network) and 80 (USB input)
+every tick and hands them to XaAES with appl_control opcode 122; XaAES
+repaints the clock strip only when what shows would change. Any app can
+draw a glyph itself with opcode 123 (struct apj_glyphreq: x, y, size, id,
+pen, alpha, clip). PSMON's Pi section shows the same facts in words
+(Network / USB input / Browser rows).

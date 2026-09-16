@@ -117,6 +117,13 @@ long nf_probe_trapped = 0;
 #define PS_PI_RAM_MB		75L
 #define PS_STAT_FLUSHES_TOTAL	76L
 #define PS_STAT_SMC_INV		77L
+#define PS_HOST_NET		78L
+#define PS_HOST_IPV4		79L
+#define PS_HOST_INPUT		80L
+#define PS_WEB_STATE		81L
+#define PS_WEB_FPS_X10		82L
+#define PS_WEB_KBPS		83L
+#define PS_WEB_RSS_MB		84L
 
 #define PS_BAD			(-1L)
 
@@ -241,6 +248,13 @@ static void sample(void)
 	data.throttled   = ps(PS_HOST_THROTTLED);
 	data.pi_model    = ps(PS_PI_MODEL);
 	data.pi_ram_mb   = ps(PS_PI_RAM_MB);
+	data.net         = ps(PS_HOST_NET);
+	data.ipv4        = ps(PS_HOST_IPV4);
+	data.input       = ps(PS_HOST_INPUT);
+	data.web_state   = ps(PS_WEB_STATE);
+	data.web_fps_x10 = ps(PS_WEB_FPS_X10);
+	data.web_kbps    = ps(PS_WEB_KBPS);
+	data.web_rss_mb  = ps(PS_WEB_RSS_MB);
 }
 
 /* ---- drawing ------------------------------------------------------------- */
@@ -699,6 +713,8 @@ int main(void)
 		data.flushes = data.compiles = data.smc = PM_NONE;
 		data.soc_mc = data.arm_khz = data.load_x100 = PM_NONE;
 		data.throttled = data.pi_model = data.pi_ram_mb = PM_NONE;
+		data.net = data.ipv4 = data.input = PM_NONE;
+		data.web_state = data.web_fps_x10 = data.web_kbps = data.web_rss_mb = PM_NONE;
 	}
 	else
 		strcpy(status, "Sampling every 500 ms.  1/2/3 scale, 0 auto.");
