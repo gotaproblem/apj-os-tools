@@ -108,6 +108,7 @@ long nf_probe_trapped = 0;
 #define PS_DESC_FIXED	48
 
 #define PS_LIST_FLOPPY	0L
+#define PS_LIST_TOS	1L
 
 #define APJ_SKINCHG_MSG	APJ_SKINCHG
 
@@ -586,12 +587,12 @@ static void do_save(void)
 
 /* ---- the image picker ---------------------------------------------------- */
 
-static void load_pick(void)
+static void load_pick(long kind)
 {
 	long n, i;
 
 	npick = 0;
-	n = nf_call(psid | NF_PS_LIST, PS_LIST_FLOPPY, -1L, 0L, 0L);
+	n = nf_call(psid | NF_PS_LIST, kind, -1L, 0L, 0L);
 	if (n <= 0)
 		return;
 	if (n > PICK_MAX)
@@ -599,11 +600,22 @@ static void load_pick(void)
 	for (i = 0; i < n; i++)
 	{
 		pick[npick][0] = '\0';
-		nf_call(psid | NF_PS_LIST, PS_LIST_FLOPPY, i,
+		nf_call(psid | NF_PS_LIST, kind, i,
 		        pick[npick], (long) sizeof(pick[0]));
 		pick[npick][sizeof(pick[0]) - 1] = '\0';
 		npick++;
 	}
+}
+
+/* A string field browses TOS images (the rom and box-TOS fields) or disk
+ * images (the floppy drives), never both - a TOS list under Drive A: or a
+ * floppy list under the box TOS is exactly the mix-up this splits. */
+static long pick_kind_for(short i)
+{
+	if (!strcmp(rows[i].name, "rom") ||
+	    !strcmp(rows[i].name, "stbox_tos"))
+		return PS_LIST_TOS;
+	return PS_LIST_FLOPPY;
 }
 
 /*
@@ -619,7 +631,7 @@ static void pick_string(short i)
 	short btn = 0;
 	long res;
 
-	load_pick();
+	load_pick(pick_kind_for(i));
 
 	if (npick > 0)
 	{
@@ -673,12 +685,16 @@ static void pick_string(short i)
 	}
 
 	/*
-	 * No host list - a TOS image, say. The file selector, which only
-	 * reaches a GEMDOS drive: on a machine with HOSTFS that is the Pi's
-	 * filesystem and this works; without it, it is the Atari's, which is
-	 * why the host list is tried first.
+	 * No host list - a TOS image. The file selector reaches a GEMDOS
+	 * drive, so it browses the Pi through HOSTFS. The ROMs live on the
+	 * share, so START THERE rather than at A: or a stored host path the
+	 * selector cannot navigate - the host maps the picked S:\... path
+	 * back to a real file when it opens it.
 	 */
-	strcpy(path, rows[i].str[0] ? rows[i].str : "A:\\*.*");
+	if (pick_kind_for(i) == PS_LIST_TOS)
+		strcpy(path, "S:\\apj-os\\stbox\\roms\\*.*");
+	else
+		strcpy(path, rows[i].str[0] ? rows[i].str : "A:\\*.*");
 	fsel_exinput(path, fname, &btn, "Choose a file");
 	if (btn != 1 || !fname[0])
 		return;
