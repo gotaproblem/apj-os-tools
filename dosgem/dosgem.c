@@ -10,10 +10,11 @@
  * Input. Until you click in the window, keys typed in it go to DOS as
  * GEM key presses (fine for a DOS prompt or a menu). A left click
  * CAPTURES: from then on the emulator routes the real keyboard, mouse and
- * joysticks to DOS directly - held keys, key-up, the relative mouse, the
- * Xbox pads - and the Atari sees none of it. Undo (ST keyboard), Scroll
- * Lock or Ctrl+Alt+F12 (USB keyboard) releases; so does another window
- * coming to the top.
+ * joysticks to DOS directly - held keys, key-up, the relative mouse -
+ * and the Atari sees none of it. The middle mouse button, Scroll Lock or
+ * Ctrl+Alt+F12 (USB), or Undo (ST keyboard) releases; so does another
+ * window coming to the top. Pads (USB and the ST joystick ports) need no
+ * capture: they are DOS's whenever the window is on top.
  * The pointer is hidden while captured.
  *
  *     DOSGEM                     file selector (Cancel = the DOS prompt)
@@ -293,11 +294,13 @@ static void show_info(void)
     if (!view_ready)
         strcpy(t, " Waiting for psdos on the Pi...");
     else if (captured)
-        strcpy(t, " Input captured - Undo (ST), Scroll Lock or Ctrl+Alt+F12 (USB) releases");
+        strcpy(t, " Captured - middle mouse button, Scroll Lock or Ctrl+Alt+F12 releases (Undo on an ST keyboard)");
     else if (paused_by_user)
         strcpy(t, " Paused - Alt+P to resume");
     else if (state_sent == 0 || state_sent == 2)
         strcpy(t, " Paused while not on top (pause=0 in DOSGEM.INF to keep running)");
+    else if (on_top)
+        strcpy(t, " Pads play while on top - click to capture keys/mouse   Alt+O open  Alt+R reset  Alt+P pause  Alt+X quit");
     else
         strcpy(t, " Click in the window to capture input   Alt+O open  Alt+R reset  Alt+P pause  Alt+X quit");
     if (strcmp(t, info) != 0) {
