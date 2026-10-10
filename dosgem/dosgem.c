@@ -11,8 +11,9 @@
  * GEM key presses (fine for a DOS prompt or a menu). A left click
  * CAPTURES: from then on the emulator routes the real keyboard, mouse and
  * joysticks to DOS directly - held keys, key-up, the relative mouse -
- * and the Atari sees none of it. The middle mouse button, Scroll Lock or
- * Ctrl+Alt+F12 (USB), or Undo (ST keyboard) releases; so does another
+ * and the Atari sees none of it. Ctrl+Alt+G (Ctrl+Option+G on a Mac
+ * keyboard), the middle mouse button, Scroll Lock or Ctrl+Alt+F12 (USB),
+ * or Undo (ST keyboard) releases; so does another
  * window coming to the top. Pads (USB and the ST joystick ports) need no
  * capture: they are DOS's whenever the window is on top.
  * The pointer is hidden while captured.
@@ -294,7 +295,7 @@ static void show_info(void)
     if (!view_ready)
         strcpy(t, " Waiting for psdos on the Pi...");
     else if (captured)
-        strcpy(t, " Captured - middle mouse button, Scroll Lock or Ctrl+Alt+F12 releases (Undo on an ST keyboard)");
+        strcpy(t, " Captured - Ctrl+Alt+G (Mac: Ctrl+Option+G), middle button or Scroll Lock releases");
     else if (paused_by_user)
         strcpy(t, " Paused - Alt+P to resume");
     else if (state_sent == 0 || state_sent == 2)
