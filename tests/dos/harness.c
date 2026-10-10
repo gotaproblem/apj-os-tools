@@ -16,6 +16,9 @@
  *   ./harness            -> 0 ok, 1 a check failed
  */
 #define APJGUI_IMPL
+/* run.sh builds both units with a maximum view smaller than the fake
+ * screen (-DDOSUI_MAX_W=1280 -DDOSUI_MAX_H=720), so a window bigger than
+ * the maximum - centred view, black margins - can be tested on it */
 
 #include "../stubvdi.h"
 #include "../../dosgem/dosui.h"
@@ -73,8 +76,8 @@ static unsigned char *give_buffer(DOSUI *u)
 	long i, n;
 	unsigned char *b;
 
-	u->buf.fd_w = (short) ((u->work.g_w + 15) & ~15);
-	u->buf.fd_h = u->work.g_h;
+	u->buf.fd_w = (short) ((u->view.g_w + 15) & ~15);
+	u->buf.fd_h = u->view.g_h;
 	u->buf.fd_wdwidth = (short) (u->buf.fd_w / 16);
 	u->buf.fd_stand = 0;
 	u->buf.fd_nplanes = 32;
@@ -95,10 +98,10 @@ static void check_view(const DOSUI *u, const unsigned char *b, const char *when)
 {
 	long x, y;
 
-	for (y = 0; y < u->work.g_h; y += 3)
-		for (x = 0; x < u->work.g_w; x += 3)
+	for (y = 0; y < u->view.g_h; y += 3)
+		for (x = 0; x < u->view.g_w; x += 3)
 		{
-			const unsigned char *s = scr + ((u->work.g_y + y) * (long) SCR_W + u->work.g_x + x) * 4;
+			const unsigned char *s = scr + ((u->view.g_y + y) * (long) SCR_W + u->view.g_x + x) * 4;
 			const unsigned char *w = b + (y * (long) u->buf.fd_w + x) * 4;
 
 			if (s[1] != w[1] || s[2] != w[2] || s[3] != w[3])
@@ -150,8 +153,19 @@ static void one_size(short x, short y, short w, short h)
 	dosui_draw(&u, 1);
 	if (blits != 1)
 		fail("a frame is not one blit", blits, 1);
-	if (pixels != (long) w * h)
-		fail("a frame does not cover the view exactly", pixels, (long) w * h);
+	if (pixels != (long) u.view.g_w * u.view.g_h)
+		fail("a frame does not cover the view exactly", pixels, (long) u.view.g_w * u.view.g_h);
+	/* a window bigger than the view: black margins, all of them */
+	if (u.view.g_w < w || u.view.g_h < h)
+	{
+		const unsigned char *p0 = scr + ((long) y * SCR_W + x) * 4;
+		const unsigned char *p1 = scr + ((long) (y + h - 1) * SCR_W + x + w - 1) * 4;
+
+		if (p0[0] == 0x5A || p1[0] == 0x5A)
+			fail("margin around the view not painted", x, y);
+		if (u.view.g_x != x + (w - u.view.g_w) / 2 || u.view.g_y != y + (h - u.view.g_h) / 2)
+			fail("view not centred", u.view.g_x, u.view.g_y);
+	}
 	if (ntxt)
 		fail("text drawn over the DOS screen", ntxt, 0);
 	check_view(&u, b, when);
@@ -166,15 +180,15 @@ static void one_size(short x, short y, short w, short h)
 		blits = pixels = 0;
 		dosui_draw(&u, 1);
 		u.clip = u.work;
-		if (blits != 1 || pixels != (long) w * bh)
-			fail("a two-row band is not one two-row blit", pixels, (long) w * bh);
+		if (blits != 1 || pixels != (long) u.view.g_w * bh)
+			fail("a two-row band is not one two-row blit", pixels, (long) u.view.g_w * bh);
 	}
 	/* a band that runs past the bottom is cut at the view */
-	dosui_band_rect(&u, (short) (h - 5), 40, &band);
-	if (band.g_y + band.g_h > u.work.g_y + u.work.g_h || band.g_h != 5)
+	dosui_band_rect(&u, (short) (u.view.g_h - 5), 40, &band);
+	if (band.g_y + band.g_h > u.view.g_y + u.view.g_h || band.g_h != 5)
 		fail("band past the bottom not cut", band.g_h, 5);
 	dosui_band_rect(&u, -3, 10, &band);
-	if (band.g_y != u.work.g_y || band.g_h != 7)
+	if (band.g_y != u.view.g_y || band.g_h != 7)
 		fail("band above the top not cut", band.g_h, 7);
 
 	/* a clip partly outside the window: still nothing outside */
@@ -193,7 +207,9 @@ int main(void)
 	one_size(16, 40, 1280, 960);    /* the natural 2x window at 1080p   */
 	one_size(100, 60, 1277, 957);   /* not a multiple of 16 wide        */
 	one_size(0, 0, 200, 160);       /* the smallest DOSGEM allows       */
-	one_size(0, 30, 1920, 1050);    /* fulled                           */
+	one_size(0, 30, 1920, 1050);    /* fulled: past the maximum view    */
+	one_size(300, 100, 1280, 720);  /* exactly the maximum              */
+	one_size(300, 100, 1281, 721);  /* one past it: odd margins         */
 	one_size(1700, 900, 220, 180);  /* in a corner                      */
 	printf("tests/dos: %s (%d failures)\n", fails ? "FAIL" : "ok", fails);
 	return fails ? 1 : 0;

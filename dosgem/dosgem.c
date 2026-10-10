@@ -11,8 +11,9 @@
  * GEM key presses (fine for a DOS prompt or a menu). A left click
  * CAPTURES: from then on the emulator routes the real keyboard, mouse and
  * joysticks to DOS directly - held keys, key-up, the relative mouse, the
- * Xbox pads - and the Atari sees none of it. Undo (ST keyboard) or Scroll
- * Lock (USB keyboard) releases; so does another window coming to the top.
+ * Xbox pads - and the Atari sees none of it. Undo (ST keyboard), Scroll
+ * Lock or Ctrl+Alt+F12 (USB keyboard) releases; so does another window
+ * coming to the top.
  * The pointer is hidden while captured.
  *
  *     DOSGEM                     file selector (Cancel = the DOS prompt)
@@ -129,6 +130,7 @@ static char  inf_dir[200] = "";
 
 static void relayout(void);
 static void redraw_all(void);
+static void set_captured(short on);
 
 /* ------------------------------------------------------------- .INF ------ */
 
@@ -291,7 +293,7 @@ static void show_info(void)
     if (!view_ready)
         strcpy(t, " Waiting for psdos on the Pi...");
     else if (captured)
-        strcpy(t, " Input captured - Undo (ST) or Scroll Lock (USB) releases");
+        strcpy(t, " Input captured - Undo (ST), Scroll Lock or Ctrl+Alt+F12 (USB) releases");
     else if (paused_by_user)
         strcpy(t, " Paused - Alt+P to resume");
     else if (state_sent == 0 || state_sent == 2)
@@ -359,7 +361,7 @@ static void dos_state(void)
     else
         bits = inf_pause ? 0 : 1;
     if (!on_top && captured)
-        captured = 0;                          /* the emulator drops it too */
+        set_captured(0);                       /* the emulator drops it too */
     if (bits != state_sent && view_ready) {
         state_sent = bits;
         nf_call(dosid | PSDOS_STATE, (long)bits);
@@ -370,42 +372,71 @@ static void dos_state(void)
 static void dos_load(const char *path)
 {
     long r;
+    char p[sizeof pending];
 
-    r = nf_call(dosid | PSDOS_LOAD, (long)(path && path[0] ? path : ""));
+    strncpy(p, path ? path : "", sizeof p - 1);
+    p[sizeof p - 1] = 0;
+    strcpy(pending, p);                        /* what a reconnect reloads */
+    r = nf_call(dosid | PSDOS_LOAD, (long)p);
     if (r == -1L) {
         form_alert(1, "[3][That file is not on a HOSTFS|drive - the Pi cannot read it.|Put DOS games under atari-share.][ OK ]");
+        pending_set = 0;
         set_msg(DOS_MSG_FAILED);
         return;
     }
+    if (r < 0) {                               /* busy / link not up: retry */
+        pending_set = 1;
+        load_done = 0;
+        return;
+    }
+    pending_set = 0;
     load_done = 1;
     ui.buf.fd_addr = NULL;                     /* until the new game draws */
     set_msg(DOS_MSG_WAIT);
 }
+
+static short req_w, req_h;              /* the view size psdos was given */
 
 static void request_view(void)
 {
     GRECT v;
 
     dosui_view_rect(&ui, &v);
-    if (nf_call(dosid | PSDOS_VIEW_NEW, (long)v.g_w, (long)v.g_h, (long)planes) > 0)
+    if (nf_call(dosid | PSDOS_VIEW_NEW, (long)v.g_w, (long)v.g_h, (long)planes) > 0) {
         view_requested = 1;
+        req_w = v.g_w;
+        req_h = v.g_h;
+    }
 }
 
 /* the link went away: back to waiting, and the game is loaded again when
  * psdos returns (a fresh DOS machine - DOS has no state to keep) */
+static long last_loss;                  /* 200 Hz ticks of the last link loss */
+
+static long hz200_sv(void) { return *(volatile long *)0x4BAL; }
+
 static void link_lost(void)
 {
+    long now = Supexec(hz200_sv);
+
     view_ready = 0;
     view_requested = 0;
     load_done = 0;
-    pending_set = 1;
     state_sent = -1;
-    if (captured) {
-        captured = 0;
-        if (mouse_hidden) { graf_mouse(M_ON, NULL); mouse_hidden = 0; }
-    }
+    captured = 0;
+    if (mouse_hidden) { graf_mouse(M_ON, NULL); mouse_hidden = 0; }
     ui.buf.fd_addr = NULL;
-    set_msg(DOS_MSG_WAIT);
+    /* psdos went away: load the game again when it is back - unless it
+     * went away twice inside 20 s, which is a game that takes psdos down
+     * with it; then wait for Alt+O / Alt+R instead of a crash loop */
+    if (last_loss && now - last_loss < 20L * 200L) {
+        pending_set = 0;
+        set_msg(DOS_MSG_FAILED);
+    } else {
+        pending_set = 1;
+        set_msg(DOS_MSG_WAIT);
+    }
+    last_loss = now;
     show_info();
 }
 
@@ -451,10 +482,17 @@ static void tick(void)
     s = nf_call(dosid | PSDOS_STATUS);
     if (!view_ready) {
         if (s & ST_VIEW) {
+            GRECT v;
+
             view_ready = 1;
             state_sent = -1;
             dos_state();
-            set_msg(DOS_MSG_WAIT);
+            /* resized while waiting: tell psdos the size it is now */
+            dosui_view_rect(&ui, &v);
+            if (v.g_w != req_w || v.g_h != req_h)
+                nf_call(dosid | PSDOS_VIEW_SIZE, (long)v.g_w, (long)v.g_h);
+            if (ui.msg != DOS_MSG_FAILED)
+                set_msg(DOS_MSG_WAIT);
             return;
         }
         if (s & ST_CONN) {
@@ -478,10 +516,10 @@ static void tick(void)
         link_lost();
         return;
     }
-    if (pending_set && !load_done) {
-        pending_set = 0;
+    if (pending_set && !load_done)
         dos_load(pending);
-    }
+    if (!buf && ui.msg == DOS_MSG_NOTT)        /* TT-RAM may be free by now */
+        ensure_buffer();
 
     /* whether the window is on top, from the AES itself */
     {
@@ -541,8 +579,11 @@ static void relayout(void)
     dosui_view_rect(&ui, &after);
     if (after.g_w != before.g_w || after.g_h != before.g_h) {
         ensure_buffer();
-        if (view_ready && after.g_w > 0 && after.g_h > 0)
+        if (view_ready && after.g_w > 0 && after.g_h > 0) {
             nf_call(dosid | PSDOS_VIEW_SIZE, (long)after.g_w, (long)after.g_h);
+            req_w = after.g_w;
+            req_h = after.g_h;
+        }
         ui.buf.fd_addr = NULL;                /* until psdos draws the new size */
     }
 }
@@ -602,6 +643,7 @@ static void open_dialog(void)
 {
     char full[320];
 
+    last_loss = 0;
     if (ask_path(full, sizeof full))
         dos_load(full);
     else
@@ -619,8 +661,10 @@ static void gem_key(short kr, short ks)
         return;
     if (ks & (K_LSHIFT | K_RSHIFT)) nf_call(dosid | PSDOS_KEY, 1L, (long)SC_LSHIFT);
     if (ks & K_CTRL)                nf_call(dosid | PSDOS_KEY, 1L, (long)SC_CTRL);
+    if (ks & K_ALT)                 nf_call(dosid | PSDOS_KEY, 1L, (long)SC_ALT);
     nf_call(dosid | PSDOS_KEY, 1L, (long)scan);
     nf_call(dosid | PSDOS_KEY, 0L, (long)scan);
+    if (ks & K_ALT)                 nf_call(dosid | PSDOS_KEY, 0L, (long)SC_ALT);
     if (ks & K_CTRL)                nf_call(dosid | PSDOS_KEY, 0L, (long)SC_CTRL);
     if (ks & (K_LSHIFT | K_RSHIFT)) nf_call(dosid | PSDOS_KEY, 0L, (long)SC_LSHIFT);
 }
@@ -796,6 +840,7 @@ int main(int argc, char **argv)
                         redraw_all();
                     }
                     if (cmd && cmd[0]) {
+                        last_loss = 0;
                         if (view_ready)
                             dos_load(cmd);
                         else {
@@ -820,6 +865,13 @@ int main(int argc, char **argv)
             on_top = 1;
             dos_state();
             if ((mb & 1) && view_ready && !captured) {
+                short bx, by, bb, bk;
+
+                /* let the Atari see the release first: a button still
+                 * down for GEM while DOS has the mouse would stay down */
+                graf_mkstate(&bx, &by, &bb, &bk);
+                if (bb & 1)
+                    evnt_button(1, 1, 0, &bx, &by, &bb, &bk);
                 if (nf_call(dosid | PSDOS_CAPTURE, 1L) > 0) {
                     set_captured(1);
                     seen_capture = -1;            /* take the serial next tick */

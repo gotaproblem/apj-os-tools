@@ -29,9 +29,16 @@ enum
 	DOS_MSG_EXITED		/* the DOS machine shut down                     */
 };
 
+/* psdos's largest view (PSDOS_MAX_W/H): a bigger window centres it */
+#ifndef DOSUI_MAX_W			/* tests/dos sets a smaller one */
+#define DOSUI_MAX_W	1920
+#define DOSUI_MAX_H	1080
+#endif
+
 typedef struct
 {
 	GRECT  work;		/* the window's work area                        */
+	GRECT  view;		/* the DOS screen: the work area, at most the max */
 	GRECT  clip;		/* what the current draw may touch               */
 	MFDB   buf;		/* the TT-RAM screen buffer; fd_addr NULL = none  */
 	short  msg;		/* DOS_MSG_*                                      */
@@ -40,9 +47,10 @@ typedef struct
 
 void dosui_layout(DOSUI *u, short x, short y, short w, short h);
 void dosui_view_rect(const DOSUI *u, GRECT *r);
-/* draw what meets u->clip: the buffer, or the fill and the message */
+/* draw what meets u->clip: the buffer (black around a centred view), or
+ * the fill and the message */
 void dosui_draw(DOSUI *u, short vh);
-/* the view rectangle of a band copied from view row y, h rows */
+/* the screen rectangle of a band copied from view row y, h rows */
 void dosui_band_rect(const DOSUI *u, short y, short h, GRECT *r);
 
 #endif /* DOSUI_H */
